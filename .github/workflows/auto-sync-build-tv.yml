@@ -2,7 +2,7 @@ name: Auto-Sync and Build TV APK
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '0 6 * * *'  # Daily at 6 AM UTC
   workflow_dispatch:
     inputs:
       force_sync:
@@ -62,21 +62,18 @@ jobs:
       with:
         fetch-depth: 0
 
-    # Increase available memory for the runner
     - name: Configure system memory
       run: |
         sudo sysctl vm.max_map_count=262144
         echo "Available memory:"
         free -h
 
-    - name: Set up JDK 17 with increased memory
+    - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
         cache: 'gradle'
-      env:
-        JAVA_OPTS: '-Xmx8g -XX:MaxMetaspaceSize=1g'
 
     - name: Setup Node.js 18
       uses: actions/setup-node@v4
@@ -218,39 +215,25 @@ jobs:
         };
         EOF
 
-    - name: Configure Gradle with maximum memory allocation
+    - name: Configure Gradle and apply TV modifications
       run: |
-        echo "📱 Configuring Gradle for React Native 0.74.1 + Hermes..."
+        echo "📱 Configuring for Android TV with memory optimization..."
         
-        # Create gradle.properties with optimized settings for RN 0.74.1
+        # Create optimized gradle.properties
         cat > android/gradle.properties << 'EOF'
         android.useAndroidX=true
         android.enableJetifier=true
-
-        # Maximum memory allocation for React Native 0.74.1 + Hermes
-        org.gradle.jvmargs=-Xmx10g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8
+        org.gradle.jvmargs=-Xmx8g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8
         org.gradle.parallel=false
         org.gradle.configureondemand=false
         org.gradle.daemon=true
         org.gradle.caching=true
-
-        # React Native optimization
         FLIPPER_VERSION=0.125.0
-
-        # Memory optimization for large projects
         android.enableR8.fullMode=false
         android.enableBuildCache=false
-        android.enableIncrementalDesugaring=false
-
-        # Jetifier optimization - disable for problematic libraries
-        android.jetifier.ignorelist=hermes-android
         EOF
-
-    - name: Apply TV configuration and build optimizations
-      run: |
-        echo "📱 Applying TV configuration with build optimizations..."
         
-        # UPDATE ANDROID MANIFEST FOR TV
+        # Update AndroidManifest.xml for TV
         cp android/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml.backup
         
         cat > android/app/src/main/AndroidManifest.xml << 'EOF'
@@ -314,15 +297,11 @@ jobs:
         </manifest>
         EOF
         
-        # UPDATE BUILD.GRADLE WITH MEMORY OPTIMIZATIONS
+        # Update build.gradle
         if [ -f "android/app/build.gradle" ]; then
           sed -i 's/versionName "3.1.0"/versionName "3.1.0-tv"/g' android/app/build.gradle
           sed -i '/versionName.*"3.1.0-tv"/a\        resConfigs "en"\n        vectorDrawables.useSupportLibrary = true' android/app/build.gradle
-          
-          # Add memory optimization settings
-          sed -i '/android {/a\    dexOptions {\n        javaMaxHeapSize "8g"\n        preDexLibraries false\n        additionalParameters = ["--multi-dex"]\n    }' android/app/build.gradle
-          
-          # Fix signing config
+          sed -i '/android {/a\    dexOptions {\n        javaMaxHeapSize "6g"\n        preDexLibraries false\n    }' android/app/build.gradle
           sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/g' android/app/build.gradle
         fi
         
@@ -353,8 +332,12 @@ jobs:
         for file in screens/*.tsx screens/*/*.tsx components/*.tsx; do
           if [ -f "$file" ] && [[ "$file" != *"tv/"* ]]; then
             if grep -q "TouchableOpacity" "$file" && ! grep -q "TVFocusable" "$file"; then
-              sed -i "/import.*from 'react'/a import {TVFocusable} from '../components/tv/TVFocusable' || './tv/TVFocusable';" "$file" 2>/dev/null || true
+              sed -i "/import.*from 'react'/a import {TVFocusable} from '../components/tv/TVFocusable';" "$file" 2>/dev/null || sed -i "/import.*from 'react'/a import {TVFocusable} from './tv/TVFocusable';" "$file" 2>/dev/null || true
               sed -i 's/TouchableOpacity/TVFocusable/g' "$file"
+              sed -i 's/fontSize: 24/fontSize: Platform.isTV ? 32 : 24/g' "$file"
+              sed -i 's/fontSize: 18/fontSize: Platform.isTV ? 24 : 18/g' "$file"
+              sed -i 's/fontSize: 16/fontSize: Platform.isTV ? 20 : 16/g' "$file"
+              sed -i 's/fontSize: 14/fontSize: Platform.isTV ? 16 : 14/g' "$file"
             fi
           fi
         done
@@ -365,18 +348,18 @@ jobs:
     - name: Fix Gradle permissions
       run: chmod +x android/gradlew
 
-    - name: Clean project with maximum memory
+    - name: Clean project
       run: |
         cd android
-        export GRADLE_OPTS="-Xmx10g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC"
-        export _JAVA_OPTIONS="-Xmx10g"
+        export GRADLE_OPTS="-Xmx8g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC"
+        export _JAVA_OPTIONS="-Xmx8g"
         ./gradlew clean
 
-    - name: Build Android TV APK with enhanced memory settings
+    - name: Build Android TV APK
       run: |
         cd android
-        export GRADLE_OPTS="-Xmx10g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC -XX:+UseStringDeduplication"
-        export _JAVA_OPTIONS="-Xmx10g"
+        export GRADLE_OPTS="-Xmx8g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC"
+        export _JAVA_OPTIONS="-Xmx8g"
         ./gradlew assembleRelease --no-daemon --max-workers=1 --no-parallel --warning-mode=none
 
     - name: Rename APK
@@ -399,14 +382,25 @@ jobs:
         tag_name: tv-v${{ github.run_number }}
         name: Vega Android TV v${{ github.run_number }}
         body: |
-          🎉 **Vega Android TV - Memory Optimized Build**
+          🎉 **Vega Android TV - Complete Build**
           
           ✅ Fixes React Native 0.74.1 + Hermes memory issues
           ✅ Complete TV support with D-pad navigation
-          ✅ TV launcher integration
-          ✅ Auto-synced with upstream
+          ✅ TV launcher integration with leanback support
+          ✅ Focus indicators and TV-optimized UI
+          ✅ Auto-synced with upstream Vega-App
           
-          📥 Download APK and install on Android TV
+          📥 **Installation:**
+          1. Download the APK below
+          2. Enable "Unknown Sources" on your Android TV
+          3. Install using file manager or ADB
+          
+          🎮 **TV Features:**
+          - Complete D-pad navigation
+          - Visual focus indicators
+          - TV launcher support
+          - Remote control friendly
+          - TV-optimized sizing
 
   notify:
     needs: [sync-upstream, build-tv-apk]
