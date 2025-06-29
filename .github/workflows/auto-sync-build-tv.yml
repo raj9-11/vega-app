@@ -468,13 +468,13 @@ jobs:
         </manifest>
         EOF
         
-        # UPDATE BUILD.GRADLE FOR TV
+        # UPDATE BUILD.GRADLE FOR TV (FIXED SYNTAX)
         if [ -f "android/app/build.gradle" ]; then
           # Add TV version suffix
           sed -i 's/versionName "3.1.0"/versionName "3.1.0-tv"/g' android/app/build.gradle
           
-          # Add TV-specific configs after versionName
-          sed -i '/versionName/a\        \n        // TV-specific configurations\n        resConfigs "en", "xxhdpi"\n        vectorDrawables.useSupportLibrary = true' android/app/build.gradle
+          # Add TV-specific configs in the correct location (fixed resConfigs syntax)
+          sed -i '/versionName.*"3.1.0-tv"/a\        \n        // TV-specific configurations\n        resConfigs "en"\n        vectorDrawables.useSupportLibrary = true' android/app/build.gradle
         fi
         
         # CREATE SEARCHABLE.XML FOR TV SEARCH
