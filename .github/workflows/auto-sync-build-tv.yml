@@ -284,39 +284,19 @@ jobs:
             # Add TV navigation options
             sed -i 's/animation: '\''default'\''/animation: Platform.isTV ? '\''none'\'' : '\''default'\''/g' App.tsx
             sed -i '/headerShown: false,/a\            gestureEnabled: !Platform.isTV,' App.tsx
-
-            # Replace tab bar buttons with TVFocusable
-            sed -i '/tabBarButton: props => {/,/},/ {
-              s/TouchableOpacity/TVFocusable/g
-              s/activeOpacity={0.8}/focusedStyle={{shadowColor: primary, shadowOffset: {width: 0, height: 0}, shadowOpacity: 0.8, shadowRadius: 15, elevation: 15}}/g
-            }' App.tsx
           fi
 
           # UPDATE ALL SRC FILES WITH TV MODIFICATIONS
           echo "📱 Applying TV modifications to ALL src files..."
 
-          # Function to safely add import if not exists
-          add_import_if_missing() {
-            local file="$1"
-            local import_line="$2"
-            if [ -f "$file" ] && ! grep -q "TVFocusable" "$file"; then
-              sed -i "/import.*from 'react'/a $import_line" "$file"
-            fi
-          }
-
-          # Function to replace TouchableOpacity with TVFocusable
-          replace_touchable() {
-            local file="$1"
+          # Update all screen files
+          for file in screens/*.tsx screens/*/*.tsx; do
             if [ -f "$file" ]; then
+              echo "Updating $file..."
+              if ! grep -q "TVFocusable" "$file"; then
+                sed -i "/import.*from 'react'/a import {TVFocusable} from '../components/tv/TVFocusable';" "$file"
+              fi
               sed -i 's/TouchableOpacity/TVFocusable/g' "$file"
-              sed -i 's/activeOpacity={[^}]*}/focusedStyle={{shadowColor: primary, shadowOffset: {width: 0, height: 0}, shadowOpacity: 0.8, shadowRadius: 15, elevation: 15}}/g' "$file"
-            fi
-          }
-
-          # Function to add TV sizing
-          add_tv_sizing() {
-            local file="$1"
-            if [ -f "$file" ]; then
               sed -i 's/fontSize: 24/fontSize: Platform.isTV ? 32 : 24/g' "$file"
               sed -i 's/fontSize: 20/fontSize: Platform.isTV ? 28 : 20/g' "$file"
               sed -i 's/fontSize: 18/fontSize: Platform.isTV ? 24 : 18/g' "$file"
@@ -324,25 +304,19 @@ jobs:
               sed -i 's/fontSize: 14/fontSize: Platform.isTV ? 16 : 14/g' "$file"
               sed -i 's/fontSize: 12/fontSize: Platform.isTV ? 14 : 12/g' "$file"
             fi
-          }
-
-          # Update all screen files
-          for file in screens/*.tsx screens/*/*.tsx; do
-            if [ -f "$file" ]; then
-              echo "Updating $file..."
-              add_import_if_missing "$file" "import {TVFocusable} from '../components/tv/TVFocusable';"
-              replace_touchable "$file"
-              add_tv_sizing "$file"
-            fi
           done
 
           # Update all component files
           for file in components/*.tsx components/*/*.tsx; do
             if [ -f "$file" ] && [[ "$file" != *"tv/"* ]]; then
               echo "Updating $file..."
-              add_import_if_missing "$file" "import {TVFocusable} from './tv/TVFocusable';"
-              replace_touchable "$file"
-              add_tv_sizing "$file"
+              if ! grep -q "TVFocusable" "$file"; then
+                sed -i "/import.*from 'react'/a import {TVFocusable} from './tv/TVFocusable';" "$file"
+              fi
+              sed -i 's/TouchableOpacity/TVFocusable/g' "$file"
+              sed -i 's/fontSize: 18/fontSize: Platform.isTV ? 24 : 18/g' "$file"
+              sed -i 's/fontSize: 16/fontSize: Platform.isTV ? 20 : 16/g' "$file"
+              sed -i 's/fontSize: 14/fontSize: Platform.isTV ? 16 : 14/g' "$file"
             fi
           done
 
@@ -351,18 +325,15 @@ jobs:
       - name: Setup keystore from GitHub secrets
         run: |
           echo "🔑 Setting up keystore from GitHub secrets..."
-          
-          # Decode the keystore from base64 and save it
           echo "${{ secrets.SIGNINGKEYBASE64 }}" | base64 --decode > android/app/keystore.jks
 
-      - name: Apply complete TV configuration
+      - name: Apply complete TV configuration for armeabi-v7a
         run: |
-          echo "📱 Applying complete TV configuration..."
+          echo "📱 Applying complete TV configuration for armeabi-v7a..."
 
           # UPDATE ANDROID MANIFEST FOR TV
           cp android/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml.backup
 
-          # Create complete TV-optimized manifest
           cat > android/app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
@@ -424,15 +395,15 @@ jobs:
           </manifest>
           EOF
 
-          # UPDATE BUILD.GRADLE FOR TV (FIXED SYNTAX) WITH KEYSTORE
+          # UPDATE BUILD.GRADLE FOR TV WITH ARMEABI-V7A ARCHITECTURE
           if [ -f "android/app/build.gradle" ]; then
             # Add TV version suffix
-            sed -i 's/versionName "3.1.0"/versionName "3.1.0-tv"/g' android/app/build.gradle
+            sed -i 's/versionName "3.1.0"/versionName "3.1.0-tv-armv7"/g' android/app/build.gradle
 
-            # Add TV-specific configs in the correct location (fixed resConfigs syntax)
-            sed -i '/versionName.*"3.1.0-tv"/a\        \n        // TV-specific configurations\n        resConfigs "en"\n        vectorDrawables.useSupportLibrary = true' android/app/build.gradle
+            # Add TV-specific configs and armeabi-v7a architecture filter
+            sed -i '/versionName.*"3.1.0-tv-armv7"/a\        \n        // TV-specific configurations for armeabi-v7a\n        resConfigs "en"\n        vectorDrawables.useSupportLibrary = true\n        \n        ndk {\n            abiFilters "armeabi-v7a"\n        }' android/app/build.gradle
 
-            # Add signing configuration using GitHub secrets
+            # Add keystore signing configuration
             sed -i '/android {/a\    signingConfigs {\n        release {\n            storeFile file("keystore.jks")\n            storePassword System.getenv("SIGNING_STORE_PASSWORD")\n            keyAlias System.getenv("SIGNING_KEY_ALIAS")\n            keyPassword System.getenv("SIGNING_KEY_PASSWORD")\n        }\n    }' android/app/build.gradle
 
             # Update release buildType to use signing config
@@ -467,11 +438,11 @@ jobs:
               android:src="@mipmap/ic_launcher" />
           EOF
 
-          echo "✅ Complete TV configuration applied!"
+          echo "✅ Complete TV configuration for armeabi-v7a applied!"
 
       - name: Update package.json version for TV
         run: |
-          sed -i 's/"version": "3.1.0"/"version": "3.1.0-tv"/g' package.json
+          sed -i 's/"version": "3.1.0"/"version": "3.1.0-tv-armv7"/g' package.json
 
       - name: Fix Gradle permissions
         run: chmod +x android/gradlew
@@ -481,50 +452,81 @@ jobs:
           cd android
           ./gradlew clean
 
-      - name: Build Android TV APK
+      - name: Build armeabi-v7a Android TV APK
         env:
           SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTOREPASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.KEYPASSWORD }}
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon --warning-mode all
+          ./gradlew assembleRelease --no-daemon --warning-mode all -PreactNativeArchitectures=armeabi-v7a
 
-      - name: Rename APK with TV suffix
+      - name: Find and rename armeabi-v7a APK
         run: |
+          echo "🔍 Searching for armeabi-v7a APK..."
+          
           cd android/app/build/outputs/apk/release
-          mv app-release.apk vega-android-tv-v$(date +%Y%m%d-%H%M).apk
+          
+          # List all files to debug
+          echo "📁 Files in release directory:"
+          ls -la
+          
+          # Look for armeabi-v7a specific APK first, then any APK
+          APK_FILE=""
+          if [ -f "app-armeabi-v7a-release.apk" ]; then
+            APK_FILE="app-armeabi-v7a-release.apk"
+          elif [ -f "app-release.apk" ]; then
+            APK_FILE="app-release.apk"
+          else
+            APK_FILE=$(find . -name "*armeabi-v7a*.apk" -type f | head -1)
+            if [ -z "$APK_FILE" ]; then
+              APK_FILE=$(find . -name "*.apk" -type f | head -1)
+            fi
+          fi
+          
+          if [ -n "$APK_FILE" ]; then
+            echo "✅ Found APK: $APK_FILE"
+            APK_FILE=$(basename "$APK_FILE")
+            mv "$APK_FILE" "vega-android-tv-armv7-v$(date +%Y%m%d-%H%M).apk"
+            echo "✅ Renamed to: vega-android-tv-armv7-v$(date +%Y%m%d-%H%M).apk"
+          else
+            echo "❌ No APK file found in release directory"
+            echo "🔍 Searching all build outputs..."
+            find ../../.. -name "*.apk" -type f
+            exit 1
+          fi
 
-      - name: Upload TV APK
+      - name: Upload armeabi-v7a TV APK
         uses: actions/upload-artifact@v4
         with:
-          name: vega-android-tv-apk
-          path: android/app/build/outputs/apk/release/vega-android-tv-*.apk
+          name: vega-android-tv-armv7-apk
+          path: android/app/build/outputs/apk/release/vega-android-tv-armv7-*.apk
           retention-days: 30
 
       - name: Create Release (if new version)
         if: needs.sync-upstream.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
         uses: softprops/action-gh-release@v1
         with:
-          files: android/app/build/outputs/apk/release/vega-android-tv-*.apk
-          tag_name: tv-auto-v${{ github.run_number }}
-          name: Vega Android TV Auto-Build v${{ github.run_number }}
+          files: android/app/build/outputs/apk/release/vega-android-tv-armv7-*.apk
+          tag_name: tv-armv7-v${{ github.run_number }}
+          name: Vega Android TV ARMv7 Build v${{ github.run_number }}
           body: |
-            🎉 **Vega Android TV - Complete Enhanced Build**
+            🎉 **Vega Android TV - ARMv7 Architecture Build**
             
             📱 **What's Updated:**
+            - ✅ Built specifically for **armeabi-v7a** architecture
+            - ✅ Optimized for older Android TV boxes
             - ✅ ALL src files modified for TV support
             - ✅ Complete D-pad navigation system
             - ✅ TV-optimized UI with focus indicators
             - ✅ Remote control compatibility
             - ✅ Leanback launcher integration
             - ✅ TV search functionality
-            - ✅ Optimized build configuration
             - ✅ Auto-synced with latest upstream changes
             - ✅ Signed with your personal keystore
             
             📥 **Installation:**
-            1. Download the APK file below
+            1. Download the ARMv7 APK file below
             2. Enable "Unknown Sources" on your Android TV
             3. Install using a file manager or ADB
             
@@ -538,13 +540,11 @@ jobs:
             - Search integration with Android TV
             - Landscape orientation optimized
             
-            🔧 **Technical Improvements:**
-            - Enhanced AndroidManifest.xml for TV
-            - Optimized build.gradle configuration
-            - TV-specific resource configurations
-            - Search functionality integration
-            - Performance optimizations for TV hardware
-            - Secure keystore signing from GitHub secrets
+            🏗️ **Architecture Info:**
+            - **Target Architecture**: armeabi-v7a only
+            - **Compatibility**: Works on ARM-based Android TV boxes
+            - **File Size**: Smaller than universal builds
+            - **Performance**: Optimized for 32-bit ARM processors
             
             🔄 **Auto-Sync:** This build automatically includes the latest changes from the original Vega-App repository with complete TV modifications applied to ALL components.
           draft: false
@@ -559,9 +559,9 @@ jobs:
       - name: Build Success Notification
         if: needs.build-tv-apk.result == 'success'
         run: |
-          echo "✅ Enhanced Android TV APK with ALL modifications built successfully!"
+          echo "✅ Android TV ARMv7 APK with ALL modifications built successfully!"
           echo "📱 Download from the Actions tab or Releases page"
-          echo "🎮 Features: Complete TV navigation, focus management, and optimization"
+          echo "🎮 Features: Complete TV navigation optimized for armeabi-v7a"
           
       - name: Build Failed Notification
         if: needs.build-tv-apk.result == 'failure'
