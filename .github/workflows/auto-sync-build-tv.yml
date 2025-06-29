@@ -2,7 +2,7 @@ name: Auto-Sync and Build TV APK
 
 on:
   schedule:
-    - cron: '0 6 * * *' # Daily at 6 AM UTC
+    - cron: '0 6 * * *'
   workflow_dispatch:
     inputs:
       force_sync:
@@ -106,7 +106,6 @@ jobs:
               if (Platform.isTV) {
                 tvEventHandler.current = new TVEventHandler();
                 tvEventHandler.current.enable(null, (cmp, evt) => {
-                  console.log('TV Event:', evt.eventType);
                   if (evt.eventType === 'focus') {
                     currentFocusId.current = evt.tag?.toString() || null;
                   }
@@ -137,12 +136,7 @@ jobs:
 
             return (
               <TVFocusContext.Provider 
-                value={{
-                  registerFocusable, 
-                  unregisterFocusable, 
-                  setFocus, 
-                  currentFocusId: currentFocusId.current
-                }}>
+                value={{registerFocusable, unregisterFocusable, setFocus, currentFocusId: currentFocusId.current}}>
                 {children}
               </TVFocusContext.Provider>
             );
@@ -220,31 +214,13 @@ jobs:
 
             if (!Platform.isTV) {
               if (activeOpacity !== undefined) {
-                return (
-                  <TouchableOpacity 
-                    style={style} 
-                    className={className} 
-                    activeOpacity={activeOpacity}
-                    {...(pressableProps as any)}>
-                    {children}
-                  </TouchableOpacity>
-                );
+                return <TouchableOpacity style={style} className={className} activeOpacity={activeOpacity} {...(pressableProps as any)}>{children}</TouchableOpacity>;
               }
-              return (
-                <Pressable style={style} className={className} {...pressableProps}>
-                  {children}
-                </Pressable>
-              );
+              return <Pressable style={style} className={className} {...pressableProps}>{children}</Pressable>;
             }
 
             return (
-              <Pressable
-                style={style}
-                className={className}
-                hasTVPreferredFocus={hasTVPreferredFocus}
-                onFocus={handleFocus}
-                onBlur={handleBlur}
-                {...pressableProps}>
+              <Pressable style={style} className={className} hasTVPreferredFocus={hasTVPreferredFocus} onFocus={handleFocus} onBlur={handleBlur} {...pressableProps}>
                 <Animated.View style={[animatedStyle, focusedStyle]}>
                   {children}
                 </Animated.View>
@@ -310,68 +286,47 @@ jobs:
           # UPDATE APP.TSX WITH COMPLETE TV INTEGRATION
           echo "📱 Updating App.tsx with TV support..."
           if [ -f "App.tsx" ]; then
-            # Add TV imports after existing imports
             sed -i '/import useDownloadsStore/a\\n// TV-specific imports\nimport {TVFocusProvider} from '\''./hooks/useTVFocus'\'';\nimport {TVFocusable} from '\''./components/tv/TVFocusable'\'';\nimport {FocusDebugger} from '\''./components/tv/FocusDebugger'\'';' App.tsx
-
-            # Wrap NavigationContainer with TVFocusProvider
             sed -i 's/<SafeAreaProvider>/<SafeAreaProvider>\n      <TVFocusProvider>/g' App.tsx
             sed -i 's/<\/SafeAreaProvider>/<\/TVFocusProvider>\n    <\/SafeAreaProvider>/g' App.tsx
-
-            # Add FocusDebugger to the main component
             sed -i 's/<NavigationContainer/<>\n        {Platform.isTV && <FocusDebugger \/>}\n        <NavigationContainer/g' App.tsx
             sed -i 's/<\/NavigationContainer>/<\/NavigationContainer>\n      <\/>/g' App.tsx
-
-            # Add TV navigation options
             sed -i 's/animation: '\''default'\''/animation: Platform.isTV ? '\''none'\'' : '\''default'\''/g' App.tsx
             sed -i '/headerShown: false,/a\            gestureEnabled: !Platform.isTV,' App.tsx
           fi
 
           # UPDATE ALL SRC FILES WITH TV MODIFICATIONS
-          echo "📱 Applying TV modifications to ALL src files..."
-
-          # Update all screen files
           for file in screens/*.tsx screens/*/*.tsx; do
             if [ -f "$file" ]; then
-              echo "Updating $file..."
               if ! grep -q "TVFocusable" "$file"; then
                 sed -i "/import.*from 'react'/a import {TVFocusable} from '../components/tv/TVFocusable';" "$file"
               fi
               sed -i 's/TouchableOpacity/TVFocusable/g' "$file"
               sed -i 's/fontSize: 24/fontSize: Platform.isTV ? 32 : 24/g' "$file"
-              sed -i 's/fontSize: 20/fontSize: Platform.isTV ? 28 : 20/g' "$file"
               sed -i 's/fontSize: 18/fontSize: Platform.isTV ? 24 : 18/g' "$file"
               sed -i 's/fontSize: 16/fontSize: Platform.isTV ? 20 : 16/g' "$file"
               sed -i 's/fontSize: 14/fontSize: Platform.isTV ? 16 : 14/g' "$file"
-              sed -i 's/fontSize: 12/fontSize: Platform.isTV ? 14 : 12/g' "$file"
             fi
           done
 
-          # Update all component files
           for file in components/*.tsx components/*/*.tsx; do
             if [ -f "$file" ] && [[ "$file" != *"tv/"* ]]; then
-              echo "Updating $file..."
               if ! grep -q "TVFocusable" "$file"; then
                 sed -i "/import.*from 'react'/a import {TVFocusable} from './tv/TVFocusable';" "$file"
               fi
               sed -i 's/TouchableOpacity/TVFocusable/g' "$file"
-              sed -i 's/fontSize: 18/fontSize: Platform.isTV ? 24 : 18/g' "$file"
-              sed -i 's/fontSize: 16/fontSize: Platform.isTV ? 20 : 16/g' "$file"
-              sed -i 's/fontSize: 14/fontSize: Platform.isTV ? 16 : 14/g' "$file"
             fi
           done
-
-          echo "✅ All src files updated with enhanced TV modifications!"
 
       - name: Setup keystore from GitHub secrets
         run: |
           echo "🔑 Setting up keystore from GitHub secrets..."
           echo "${{ secrets.SIGNINGKEYBASE64 }}" | base64 --decode > android/app/keystore.jks
 
-      - name: Apply complete TV configuration
+      - name: Apply TV configuration for armeabi-v7a
         run: |
-          echo "📱 Applying complete TV configuration..."
+          echo "📱 Applying TV configuration for armeabi-v7a..."
 
-          # UPDATE ANDROID MANIFEST FOR TV
           cp android/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml.backup
 
           cat > android/app/src/main/AndroidManifest.xml << 'EOF'
@@ -435,18 +390,10 @@ jobs:
           </manifest>
           EOF
 
-          # UPDATE BUILD.GRADLE FOR TV WITH KEYSTORE
           if [ -f "android/app/build.gradle" ]; then
-            # Add TV version suffix
-            sed -i 's/versionName "3.1.0"/versionName "3.1.0-tv-enhanced"/g' android/app/build.gradle
-
-            # Add TV-specific configs
-            sed -i '/versionName.*"3.1.0-tv-enhanced"/a\        \n        // TV-specific configurations\n        resConfigs "en"\n        vectorDrawables.useSupportLibrary = true' android/app/build.gradle
-
-            # Add signing configuration using GitHub secrets
+            sed -i 's/versionName "3.1.0"/versionName "3.1.0-tv-armv7"/g' android/app/build.gradle
+            sed -i '/versionName.*"3.1.0-tv-armv7"/a\        \n        // TV armeabi-v7a configuration\n        resConfigs "en"\n        vectorDrawables.useSupportLibrary = true\n        \n        ndk {\n            abiFilters "armeabi-v7a"\n        }' android/app/build.gradle
             sed -i '/android {/a\    signingConfigs {\n        release {\n            storeFile file("keystore.jks")\n            storePassword System.getenv("SIGNING_STORE_PASSWORD")\n            keyAlias System.getenv("SIGNING_KEY_ALIAS")\n            keyPassword System.getenv("SIGNING_KEY_PASSWORD")\n        }\n    }' android/app/build.gradle
-
-            # Update release buildType to use signing config
             sed -i '/buildTypes {/,/}/ {
               /release {/,/}/ {
                 /signingConfig/d
@@ -455,7 +402,6 @@ jobs:
             }' android/app/build.gradle
           fi
 
-          # CREATE SEARCHABLE.XML FOR TV SEARCH
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/searchable.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -465,24 +411,8 @@ jobs:
               android:searchMode="showSearchLabelAsBadge" />
           EOF
 
-          # UPDATE STRINGS.XML WITH TV STRINGS
-          if [ -f "android/app/src/main/res/values/strings.xml" ]; then
-            sed -i '/<\/resources>/i\    <string name="tv_app_name">Vega TV Enhanced</string>\n    <string name="tv_banner_description">Vega - Movies and Series for Android TV with Enhanced Focus</string>' android/app/src/main/res/values/strings.xml
-          fi
-
-          # CREATE TV BANNER DRAWABLE
-          mkdir -p android/app/src/main/res/drawable
-          cat > android/app/src/main/res/drawable/tv_banner.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-              android:src="@mipmap/ic_launcher" />
-          EOF
-
-          echo "✅ Complete TV configuration applied!"
-
-      - name: Update package.json version for TV
-        run: |
-          sed -i 's/"version": "3.1.0"/"version": "3.1.0-tv-enhanced"/g' package.json
+      - name: Update package.json version
+        run: sed -i 's/"version": "3.1.0"/"version": "3.1.0-tv-armv7"/g' package.json
 
       - name: Fix Gradle permissions
         run: chmod +x android/gradlew
@@ -492,94 +422,82 @@ jobs:
           cd android
           ./gradlew clean
 
-      - name: Build Android TV APK with enhanced focus
+      - name: Build armeabi-v7a Android TV APK with enhanced focus
         env:
           SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTOREPASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.KEYPASSWORD }}
         run: |
           cd android
-          ./gradlew assembleRelease --no-daemon --warning-mode all
+          ./gradlew assembleRelease -PreactNativeArchitectures=armeabi-v7a --no-daemon --warning-mode all
 
-      - name: Find and rename enhanced TV APK
+      - name: Find and rename armeabi-v7a APK
         run: |
-          echo "🔍 Searching for enhanced TV APK..."
+          echo "🔍 Searching for armeabi-v7a APK..."
           
           cd android/app/build/outputs/apk/release
-          
-          # List all files to debug
-          echo "📁 Files in release directory:"
           ls -la
           
-          # Find any APK file
-          APK_FILE=$(find . -name "*.apk" -type f | head -1)
+          APK_FILE=""
+          if [ -f "app-armeabi-v7a-release.apk" ]; then
+            APK_FILE="app-armeabi-v7a-release.apk"
+          elif [ -f "app-release.apk" ]; then
+            APK_FILE="app-release.apk"
+          else
+            APK_FILE=$(find . -name "*.apk" -type f | head -1)
+          fi
           
           if [ -n "$APK_FILE" ]; then
-            echo "✅ Found APK: $APK_FILE"
             APK_FILE=$(basename "$APK_FILE")
-            mv "$APK_FILE" "vega-android-tv-enhanced-v$(date +%Y%m%d-%H%M).apk"
-            echo "✅ Renamed to: vega-android-tv-enhanced-v$(date +%Y%m%d-%H%M).apk"
+            mv "$APK_FILE" "vega-android-tv-armv7-enhanced-v$(date +%Y%m%d-%H%M).apk"
+            echo "✅ Renamed to: vega-android-tv-armv7-enhanced-v$(date +%Y%m%d-%H%M).apk"
           else
-            echo "❌ No APK file found in release directory"
-            echo "🔍 Searching all build outputs..."
+            echo "❌ No APK found"
             find ../../.. -name "*.apk" -type f
             exit 1
           fi
 
-      - name: Upload enhanced TV APK
+      - name: Upload armeabi-v7a TV APK
         uses: actions/upload-artifact@v4
         with:
-          name: vega-android-tv-enhanced-apk
-          path: android/app/build/outputs/apk/release/vega-android-tv-enhanced-*.apk
+          name: vega-android-tv-armv7-enhanced-apk
+          path: android/app/build/outputs/apk/release/vega-android-tv-armv7-enhanced-*.apk
           retention-days: 30
 
-      - name: Create Release (if new version)
+      - name: Create Release
         if: needs.sync-upstream.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
         uses: softprops/action-gh-release@v1
         with:
-          files: android/app/build/outputs/apk/release/vega-android-tv-enhanced-*.apk
-          tag_name: tv-enhanced-v${{ github.run_number }}
-          name: Vega Android TV Enhanced Focus v${{ github.run_number }}
+          files: android/app/build/outputs/apk/release/vega-android-tv-armv7-enhanced-*.apk
+          tag_name: tv-armv7-enhanced-v${{ github.run_number }}
+          name: Vega TV ARMv7 Enhanced v${{ github.run_number }}
           body: |
-            🎉 **Vega Android TV - Enhanced Focus Visibility Build**
+            🎉 **Vega Android TV - ARMv7 Enhanced Focus Build**
             
-            📱 **What's New in This Build:**
-            - ✅ **ENHANCED FOCUS INDICATORS** - Bright cyan borders and glow effects
-            - ✅ **LARGER SCALE ANIMATION** - 15% size increase when focused
-            - ✅ **FOCUS DEBUGGER** - On-screen display showing current focus
-            - ✅ **CONSOLE LOGGING** - Debug focus events in logcat
-            - ✅ **BETTER VISUAL FEEDBACK** - Background tint when focused
-            - ✅ **ALL src files modified for TV support**
-            - ✅ **Complete D-pad navigation system**
-            - ✅ **TV-optimized UI with enhanced focus indicators**
-            - ✅ **Remote control compatibility**
-            - ✅ **Leanback launcher integration**
-            - ✅ **Auto-synced with latest upstream changes**
-            - ✅ **Signed with your personal keystore**
+            📱 **Architecture: armeabi-v7a ONLY**
+            - ✅ **Built specifically for 32-bit ARM Android TV boxes**
+            - ✅ **Enhanced focus indicators** - Bright cyan borders and glow
+            - ✅ **Debug overlay** - Shows current focus state
+            - ✅ **Optimized for older ATV hardware**
+            - ✅ **Complete D-pad navigation**
+            - ✅ **TV launcher integration**
+            - ✅ **Signed with your keystore**
             
             📥 **Installation:**
-            1. Download the enhanced APK file below
+            1. Download the ARMv7 APK below
             2. Enable "Unknown Sources" on your Android TV
-            3. Install using a file manager or ADB
+            3. Install and enjoy enhanced focus visibility
             
-            🎮 **Enhanced TV Features:**
-            - **Bright cyan focus borders** - 6px thick, highly visible
+            🎮 **Enhanced Focus Features:**
+            - **Cyan borders** - 6px thick, highly visible
             - **Scale animation** - Items grow 15% when focused
-            - **Glow effects** - Shadow and elevation for depth
-            - **Background tint** - Subtle blue background when focused
-            - **Debug overlay** - Shows current focus state in top-right
-            - **Console logging** - Track focus events via ADB logcat
-            - **Complete D-pad navigation** throughout app
-            - **TV launcher support** with proper banner
-            - **Remote control friendly** interface
+            - **Glow effects** - Shadow and elevation
+            - **Debug panel** - Top-right corner focus tracker
             
-            🔧 **Focus Debugging:**
-            - **Visual Debug Panel** - Top-right corner shows focus events
-            - **Console Logs** - Use `adb logcat | grep "🎯"` to see focus events
-            - **Color Coding** - Cyan (#00BFFF) for high visibility
-            - **Animation Feedback** - Smooth transitions for better UX
-            
-            🔄 **Auto-Sync:** This build automatically includes the latest changes from the original Vega-App repository with complete TV modifications applied to ALL components.
+            🏗️ **Architecture Info:**
+            - **Target**: armeabi-v7a (32-bit ARM)
+            - **Compatibility**: Most Android TV boxes
+            - **Size**: Optimized for single architecture
           draft: false
           prerelease: false
 
@@ -589,15 +507,10 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Build Success Notification
+      - name: Build Success
         if: needs.build-tv-apk.result == 'success'
-        run: |
-          echo "✅ Enhanced Android TV APK with focus visibility improvements built successfully!"
-          echo "📱 Download from the Actions tab or Releases page"
-          echo "🎮 Features: Enhanced focus indicators, debug overlay, and better visibility"
-          
-      - name: Build Failed Notification
+        run: echo "✅ ARMv7 Android TV APK with enhanced focus built successfully!"
+        
+      - name: Build Failed
         if: needs.build-tv-apk.result == 'failure'
-        run: |
-          echo "❌ Android TV APK build failed!"
-          echo "🔍 Check the logs above for errors"
+        run: echo "❌ Build failed - check logs above"
