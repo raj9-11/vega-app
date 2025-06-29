@@ -75,48 +75,70 @@ jobs:
           node-version: '18'
           cache: 'npm'
 
-      - name: Clean and properly install react-native-tvos
+      - name: Complete cleanup and install react-native-tvos
         run: |
-          # Complete cleanup based on search results
+          # Complete cleanup as suggested in search results
           rm -rf node_modules package-lock.json
           rm -rf ~/.gradle/caches
           npm cache clean --force
           
-          # Install dependencies with legacy peer deps
+          # Install with legacy peer deps
           npm install --legacy-peer-deps
           
-          # Remove standard react-native completely
+          # Remove react-native completely
           npm uninstall react-native @react-native-community/cli @react-native-community/cli-platform-android
           
-          # Install react-native-tvos and ensure proper structure
+          # Install react-native-tvos
           npm install react-native-tvos@0.74.1-0 --legacy-peer-deps
+
+      - name: Fix ReactAndroid gradle.properties path issue
+        run: |
+          echo "🔧 Fixing ReactAndroid gradle.properties path issue..."
           
-          # Verify the installation
+          # Check if react-native-tvos is installed properly
           if [ ! -d "node_modules/react-native-tvos" ]; then
-            echo "❌ react-native-tvos not installed properly"
+            echo "❌ react-native-tvos not found"
             exit 1
           fi
           
-          # Create missing ReactAndroid structure if needed
-          if [ ! -f "node_modules/react-native-tvos/ReactAndroid/gradle.properties" ]; then
-            echo "📂 Creating missing ReactAndroid structure..."
-            mkdir -p node_modules/react-native-tvos/ReactAndroid
-            
-            # Create the missing gradle.properties file
-            cat > node_modules/react-native-tvos/ReactAndroid/gradle.properties << 'EOF'
-          # ReactAndroid gradle.properties for react-native-tvos
+          # Create the expected react-native directory structure
+          mkdir -p node_modules/react-native/ReactAndroid
+          
+          # Copy ReactAndroid structure from react-native-tvos to react-native
+          if [ -d "node_modules/react-native-tvos/ReactAndroid" ]; then
+            cp -r node_modules/react-native-tvos/ReactAndroid/* node_modules/react-native/ReactAndroid/
+          else
+            # Create minimal ReactAndroid structure if it doesn't exist
+            cat > node_modules/react-native/ReactAndroid/gradle.properties << 'EOF'
+          # ReactAndroid gradle.properties for react-native-tvos compatibility
           android.useAndroidX=true
           android.enableJetifier=true
+          FLIPPER_VERSION=0.125.0
           EOF
           fi
           
-          # Update package.json to point to react-native-tvos
-          sed -i 's/"react-native":.*/"react-native": "npm:react-native-tvos@0.74.1-0",/' package.json
-
-      - name: Create react-native-tvos components with enhanced focus
-        run: |
-          echo "🔄 Creating react-native-tvos components..."
+          # Create react-native package.json pointing to react-native-tvos
+          cat > node_modules/react-native/package.json << 'EOF'
+          {
+            "name": "react-native",
+            "version": "0.74.1",
+            "description": "react-native-tvos compatibility layer",
+            "main": "../react-native-tvos/index.js"
+          }
+          EOF
           
+          # Create necessary symlinks for gradle to find files
+          if [ ! -f "node_modules/react-native/index.js" ]; then
+            ln -sf ../react-native-tvos/index.js node_modules/react-native/index.js
+          fi
+          
+          # Update package.json to use react-native-tvos
+          sed -i 's/"react-native":.*/"react-native": "npm:react-native-tvos@0.74.1-0",/' package.json
+          
+          echo "✅ ReactAndroid path issue fixed"
+
+      - name: Create react-native-tvos components
+        run: |
           mkdir -p components/tvos
           cat > components/tvos/TVOSFocusable.tsx << 'EOF'
           import React from 'react';
@@ -164,7 +186,7 @@ jobs:
           };
           EOF
 
-      - name: Apply source code modifications
+      - name: Apply source modifications
         run: |
           if [ -f "App.tsx" ]; then
             sed -i '/import useDownloadsStore/a\\n// react-native-tvos imports\nimport {TVOSFocusable} from '\''./components/tvos/TVOSFocusable'\'';' App.tsx
@@ -183,34 +205,8 @@ jobs:
         run: |
           echo "${{ secrets.SIGNINGKEYBASE64 }}" | base64 --decode > android/app/keystore.jks
 
-      - name: Fix Android configuration for react-native-tvos
+      - name: Configure Android for react-native-tvos
         run: |
-          # Update android/build.gradle to work with react-native-tvos
-          if [ -f "android/build.gradle" ]; then
-            # Comment out problematic react-native references
-            sed -i 's/apply plugin: "com.facebook.react.rootproject"/\/\/ apply plugin: "com.facebook.react.rootproject"/' android/build.gradle
-            
-            # Add manual configuration for react-native-tvos
-            cat >> android/build.gradle << 'EOF'
-          
-          // Manual configuration for react-native-tvos
-          allprojects {
-              repositories {
-                  maven { url "https://www.jitpack.io" }
-                  maven { url file("${rootDir}/../node_modules/react-native-tvos/android") }
-                  google()
-                  mavenCentral()
-              }
-          }
-          EOF
-          fi
-          
-          # Update settings.gradle to handle react-native-tvos
-          if [ -f "android/settings.gradle" ]; then
-            # Comment out problematic CLI references
-            sed -i 's/^apply from.*cli-platform-android.*native_modules.gradle.*/\/\/ &/' android/settings.gradle
-          fi
-
           cp android/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml.backup
 
           cat > android/app/src/main/AndroidManifest.xml << 'EOF'
@@ -275,8 +271,8 @@ jobs:
           EOF
 
           if [ -f "android/app/build.gradle" ]; then
-            sed -i 's/versionName "3.1.0"/versionName "3.1.0-tvos-fixed"/g' android/app/build.gradle
-            sed -i '/versionName.*"3.1.0-tvos-fixed"/a\        ndk {\n            abiFilters "armeabi-v7a"\n        }' android/app/build.gradle
+            sed -i 's/versionName "3.1.0"/versionName "3.1.0-tvos-path-fixed"/g' android/app/build.gradle
+            sed -i '/versionName.*"3.1.0-tvos-path-fixed"/a\        ndk {\n            abiFilters "armeabi-v7a"\n        }' android/app/build.gradle
             sed -i '/android {/a\    signingConfigs {\n        release {\n            storeFile file("keystore.jks")\n            storePassword System.getenv("SIGNING_STORE_PASSWORD")\n            keyAlias System.getenv("SIGNING_KEY_ALIAS")\n            keyPassword System.getenv("SIGNING_KEY_PASSWORD")\n        }\n    }' android/app/build.gradle
             sed -i '/buildTypes {/,/}/ {
               /release {/,/}/ {
@@ -284,15 +280,12 @@ jobs:
                 a\            signingConfig signingConfigs.release
               }
             }' android/app/build.gradle
-            
-            # Comment out problematic CLI references in app/build.gradle
-            sed -i 's/^apply from.*cli-platform-android.*native_modules.gradle.*/\/\/ &/' android/app/build.gradle
           fi
 
       - name: Fix Gradle permissions
         run: chmod +x android/gradlew
 
-      - name: Clean and build
+      - name: Build with path fix
         env:
           SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTOREPASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.ALIAS }}
@@ -309,8 +302,8 @@ jobs:
           APK_FILE=$(find . -name "*.apk" -type f | head -1)
           if [ -n "$APK_FILE" ]; then
             APK_FILE=$(basename "$APK_FILE")
-            mv "$APK_FILE" "vega-tvos-fixed-armv7-v$(date +%Y%m%d-%H%M).apk"
-            echo "✅ Renamed to: vega-tvos-fixed-armv7-v$(date +%Y%m%d-%H%M).apk"
+            mv "$APK_FILE" "vega-tvos-path-fixed-armv7-v$(date +%Y%m%d-%H%M).apk"
+            echo "✅ Renamed to: vega-tvos-path-fixed-armv7-v$(date +%Y%m%d-%H%M).apk"
           else
             echo "❌ No APK found"
             exit 1
@@ -319,29 +312,30 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: vega-tvos-fixed-armv7-apk
-          path: android/app/build/outputs/apk/release/vega-tvos-fixed-armv7-*.apk
+          name: vega-tvos-path-fixed-armv7-apk
+          path: android/app/build/outputs/apk/release/vega-tvos-path-fixed-armv7-*.apk
           retention-days: 30
 
       - name: Create Release
         if: needs.sync-upstream.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
         uses: softprops/action-gh-release@v1
         with:
-          files: android/app/build/outputs/apk/release/vega-tvos-fixed-armv7-*.apk
-          tag_name: tvos-fixed-v${{ github.run_number }}
-          name: Vega TVOS Fixed v${{ github.run_number }}
+          files: android/app/build/outputs/apk/release/vega-tvos-path-fixed-armv7-*.apk
+          tag_name: tvos-path-fixed-v${{ github.run_number }}
+          name: Vega TVOS Path Fixed v${{ github.run_number }}
           body: |
-            Vega Android TV - react-native-tvos with ReactAndroid Fix
+            Vega Android TV - react-native-tvos with Path Fix
             
-            Fixed ReactAndroid gradle.properties missing issue
+            Fixed ReactAndroid gradle.properties path mismatch
             - Resolved node_modules/react-native/ReactAndroid/gradle.properties error
+            - Created compatibility layer between react-native and react-native-tvos
             - armeabi-v7a optimized for Android TV boxes
             - Enhanced focus indicators for dark themes
             - Auto-sync with main Vega app maintained
             - Signed with personal keystore
             
             Installation:
-            1. Download the fixed TVOS APK below
+            1. Download the path-fixed TVOS APK below
             2. Enable Unknown Sources on your Android TV
             3. Install and experience enhanced TV navigation
           draft: false
@@ -355,7 +349,7 @@ jobs:
     steps:
       - name: Build Success
         if: needs.build-tvos-apk.result == 'success'
-        run: echo "✅ react-native-tvos with ReactAndroid fix built successfully!"
+        run: echo "✅ react-native-tvos with path fix built successfully!"
         
       - name: Build Failed
         if: needs.build-tvos-apk.result == 'failure'
