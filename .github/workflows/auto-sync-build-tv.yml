@@ -517,7 +517,7 @@ jobs:
     - name: Build Android TV APK
       run: |
         cd android
-        ./gradlew assembleRelease --no-daemon --warning-mode all
+        ./gradlew assembleDebug --no-daemon --warning-mode all
 
     - name: Rename APK with TV suffix
       run: |
