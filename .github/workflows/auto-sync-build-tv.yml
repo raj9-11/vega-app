@@ -75,12 +75,22 @@ jobs:
           node-version: '18'
           cache: 'npm'
 
-      - name: Install dependencies and migrate to react-native-tvos
+      - name: Install dependencies with legacy peer deps support
         run: |
-          npm install
+          # Install original dependencies with legacy peer deps
+          npm install --legacy-peer-deps
+          
+          # Set npm config for legacy peer deps
+          npm config set legacy-peer-deps true
+          
+          # Remove react-native and install compatible react-native-tvos version
           npm uninstall react-native
-          npm install react-native-tvos@latest
-          sed -i 's/"react-native":.*/"react-native": "npm:react-native-tvos@latest",/' package.json
+          
+          # Install specific compatible version of react-native-tvos that works with React 18
+          npm install react-native-tvos@0.74.1-0 --legacy-peer-deps
+          
+          # Update package.json to use react-native-tvos
+          sed -i 's/"react-native":.*/"react-native": "npm:react-native-tvos@0.74.1-0",/' package.json
 
       - name: Create react-native-tvos optimized TV components
         run: |
@@ -89,7 +99,7 @@ jobs:
           mkdir -p components/tvos
           cat > components/tvos/TVOSFocusable.tsx << 'EOF'
           import React from 'react';
-          import {Pressable, TVFocusGuideView, ViewStyle, PressableProps, Platform} from 'react-native';
+          import {Pressable, ViewStyle, PressableProps, Platform} from 'react-native';
 
           interface TVOSFocusableProps extends PressableProps {
             children: React.ReactNode;
@@ -106,31 +116,29 @@ jobs:
             }
 
             return (
-              <TVFocusGuideView>
-                <Pressable
-                  style={({focused}) => [
-                    {
-                      borderWidth: focused ? 6 : 0,
-                      borderColor: focused ? '#FFFF00' : 'transparent',
-                      borderRadius: focused ? 8 : 0,
-                      backgroundColor: focused ? 'rgba(255, 255, 0, 0.2)' : 'transparent',
-                      transform: [{scale: focused ? 1.1 : 1}],
-                      shadowColor: focused ? '#FFFF00' : 'transparent',
-                      shadowOpacity: focused ? 1 : 0,
-                      shadowRadius: focused ? 20 : 0,
-                      shadowOffset: {width: 0, height: 0},
-                      elevation: focused ? 15 : 0,
-                    },
-                    style,
-                    focused && focusedStyle,
-                  ]}
-                  hasTVPreferredFocus={hasTVPreferredFocus}
-                  onFocus={() => console.log('TVOS FOCUSED')}
-                  onBlur={() => console.log('TVOS BLURRED')}
-                  {...pressableProps}>
-                  {children}
-                </Pressable>
-              </TVFocusGuideView>
+              <Pressable
+                style={({focused}) => [
+                  {
+                    borderWidth: focused ? 6 : 0,
+                    borderColor: focused ? '#FFFF00' : 'transparent',
+                    borderRadius: focused ? 8 : 0,
+                    backgroundColor: focused ? 'rgba(255, 255, 0, 0.2)' : 'transparent',
+                    transform: [{scale: focused ? 1.15 : 1}],
+                    shadowColor: focused ? '#FFFF00' : 'transparent',
+                    shadowOpacity: focused ? 1 : 0,
+                    shadowRadius: focused ? 25 : 0,
+                    shadowOffset: {width: 0, height: 0},
+                    elevation: focused ? 20 : 0,
+                  },
+                  style,
+                  focused && focusedStyle,
+                ]}
+                hasTVPreferredFocus={hasTVPreferredFocus}
+                onFocus={() => console.log('🎯 TVOS FOCUSED')}
+                onBlur={() => console.log('🎯 TVOS BLURRED')}
+                {...pressableProps}>
+                {children}
+              </Pressable>
             );
           };
           EOF
@@ -140,7 +148,7 @@ jobs:
           import {View, Text, Platform} from 'react-native';
 
           export const TVOSDebugger = () => {
-            const [focusInfo, setFocusInfo] = useState('react-native-tvos Ready');
+            const [focusInfo, setFocusInfo] = useState('react-native-tvos@0.74.1-0 Ready');
 
             useEffect(() => {
               if (!Platform.isTV) return;
@@ -148,7 +156,7 @@ jobs:
               const originalLog = console.log;
               console.log = (...args) => {
                 const message = args.join(' ');
-                if (message.includes('TVOS')) {
+                if (message.includes('🎯 TVOS')) {
                   setFocusInfo(message);
                 }
                 originalLog(...args);
@@ -175,10 +183,13 @@ jobs:
                 minWidth: 300,
               }}>
                 <Text style={{color: '#FFFF00', fontSize: 16, fontWeight: 'bold'}}>
-                  REACT-NATIVE-TVOS
+                  REACT-NATIVE-TVOS v0.74.1-0
                 </Text>
                 <Text style={{color: 'white', fontSize: 14, marginTop: 8}}>
                   {focusInfo}
+                </Text>
+                <Text style={{color: '#888', fontSize: 12, marginTop: 4}}>
+                  Platform.isTV: {Platform.isTV.toString()}
                 </Text>
               </View>
             );
@@ -316,8 +327,8 @@ jobs:
           APK_FILE=$(find . -name "*.apk" -type f | head -1)
           if [ -n "$APK_FILE" ]; then
             APK_FILE=$(basename "$APK_FILE")
-            mv "$APK_FILE" "vega-tvos-armv7-v$(date +%Y%m%d-%H%M).apk"
-            echo "Renamed to: vega-tvos-armv7-v$(date +%Y%m%d-%H%M).apk"
+            mv "$APK_FILE" "vega-tvos-armv7-compatible-v$(date +%Y%m%d-%H%M).apk"
+            echo "Renamed to: vega-tvos-armv7-compatible-v$(date +%Y%m%d-%H%M).apk"
           else
             echo "No APK found"
             exit 1
@@ -326,38 +337,37 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: vega-tvos-armv7-apk
-          path: android/app/build/outputs/apk/release/vega-tvos-armv7-*.apk
+          name: vega-tvos-armv7-compatible-apk
+          path: android/app/build/outputs/apk/release/vega-tvos-armv7-compatible-*.apk
           retention-days: 30
 
       - name: Create Release
         if: needs.sync-upstream.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
         uses: softprops/action-gh-release@v1
         with:
-          files: android/app/build/outputs/apk/release/vega-tvos-armv7-*.apk
-          tag_name: tvos-armv7-v${{ github.run_number }}
-          name: Vega TVOS ARMv7 v${{ github.run_number }}
+          files: android/app/build/outputs/apk/release/vega-tvos-armv7-compatible-*.apk
+          tag_name: tvos-compatible-v${{ github.run_number }}
+          name: Vega TVOS Compatible v${{ github.run_number }}
           body: |
-            Vega Android TV - react-native-tvos Build
+            Vega Android TV - react-native-tvos Compatible Build
             
-            Built with react-native-tvos for superior TV experience
+            Built with react-native-tvos@0.74.1-0 for React 18 compatibility
             - armeabi-v7a optimized for your Android TV box
-            - TVFocusGuideView for native TV focus management
+            - Compatible with existing React 18.2.0 dependencies
             - Bright yellow focus indicators visible on dark theme
             - Auto-sync with main Vega app
-            - Platform.isTV detection for proper TV/mobile separation
             - Signed with your personal keystore
             
             Installation:
-            1. Download the TVOS APK below
+            1. Download the compatible TVOS APK below
             2. Enable Unknown Sources on your Android TV
-            3. Install and experience native TV navigation
+            3. Install and experience enhanced TV navigation
             
-            react-native-tvos Features:
-            - Native focus states with built-in focused styling
-            - TVFocusGuideView for advanced focus control
-            - Better performance with TV-optimized rendering
-            - Debug overlay showing Platform.isTV status
+            Features:
+            - Native TV focus states with {focused} styling
+            - Enhanced focus indicators optimized for dark themes
+            - Better TV navigation with react-native-tvos
+            - Debug overlay showing focus events
           draft: false
           prerelease: false
 
@@ -369,7 +379,7 @@ jobs:
     steps:
       - name: Build Success
         if: needs.build-tvos-apk.result == 'success'
-        run: echo "react-native-tvos ARMv7 APK built successfully!"
+        run: echo "react-native-tvos compatible APK built successfully!"
         
       - name: Build Failed
         if: needs.build-tvos-apk.result == 'failure'
