@@ -77,21 +77,15 @@ jobs:
 
       - name: Install dependencies and migrate to react-native-tvos
         run: |
-          # Install original dependencies first
           npm install
-          
-          # Replace react-native with react-native-tvos
           npm uninstall react-native
           npm install react-native-tvos@latest
-          
-          # Update package.json to use react-native-tvos
           sed -i 's/"react-native":.*/"react-native": "npm:react-native-tvos@latest",/' package.json
 
       - name: Create react-native-tvos optimized TV components
         run: |
-          echo "🔄 Creating react-native-tvos optimized components..."
+          echo "Creating react-native-tvos components..."
           
-          # CREATE TVOS OPTIMIZED COMPONENTS
           mkdir -p components/tvos
           cat > components/tvos/TVOSFocusable.tsx << 'EOF'
           import React from 'react';
@@ -102,33 +96,17 @@ jobs:
             style?: ViewStyle;
             focusedStyle?: ViewStyle;
             hasTVPreferredFocus?: boolean;
-            autoFocus?: boolean;
-            trapFocusUp?: boolean;
-            trapFocusDown?: boolean;
-            trapFocusLeft?: boolean;
-            trapFocusRight?: boolean;
           }
 
           export const TVOSFocusable: React.FC<TVOSFocusableProps> = ({
-            children, style, focusedStyle, hasTVPreferredFocus = false,
-            autoFocus = false, trapFocusUp = false, trapFocusDown = false,
-            trapFocusLeft = false, trapFocusRight = false, ...pressableProps
+            children, style, focusedStyle, hasTVPreferredFocus = false, ...pressableProps
           }) => {
             if (!Platform.isTV) {
-              return (
-                <Pressable style={style} {...pressableProps}>
-                  {children}
-                </Pressable>
-              );
+              return <Pressable style={style} {...pressableProps}>{children}</Pressable>;
             }
 
             return (
-              <TVFocusGuideView
-                autoFocus={autoFocus}
-                trapFocusUp={trapFocusUp}
-                trapFocusDown={trapFocusDown}
-                trapFocusLeft={trapFocusLeft}
-                trapFocusRight={trapFocusRight}>
+              <TVFocusGuideView>
                 <Pressable
                   style={({focused}) => [
                     {
@@ -147,8 +125,8 @@ jobs:
                     focused && focusedStyle,
                   ]}
                   hasTVPreferredFocus={hasTVPreferredFocus}
-                  onFocus={() => console.log('🎯 TVOS FOCUSED')}
-                  onBlur={() => console.log('🎯 TVOS BLURRED')}
+                  onFocus={() => console.log('TVOS FOCUSED')}
+                  onBlur={() => console.log('TVOS BLURRED')}
                   {...pressableProps}>
                   {children}
                 </Pressable>
@@ -157,42 +135,6 @@ jobs:
           };
           EOF
 
-          # CREATE TVOS NAVIGATION GRID
-          cat > components/tvos/TVOSNavigationGrid.tsx << 'EOF'
-          import React from 'react';
-          import {View, TVFocusGuideView, Platform} from 'react-native';
-
-          interface TVOSNavigationGridProps {
-            children: React.ReactNode;
-            autoFocus?: boolean;
-            trapFocusLeft?: boolean;
-            trapFocusRight?: boolean;
-            trapFocusUp?: boolean;
-            trapFocusDown?: boolean;
-          }
-
-          export const TVOSNavigationGrid: React.FC<TVOSNavigationGridProps> = ({
-            children, autoFocus = false, trapFocusLeft = false, trapFocusRight = false,
-            trapFocusUp = false, trapFocusDown = false
-          }) => {
-            if (!Platform.isTV) {
-              return <View>{children}</View>;
-            }
-
-            return (
-              <TVFocusGuideView
-                autoFocus={autoFocus}
-                trapFocusLeft={trapFocusLeft}
-                trapFocusRight={trapFocusRight}
-                trapFocusUp={trapFocusUp}
-                trapFocusDown={trapFocusDown}>
-                {children}
-              </TVFocusGuideView>
-            );
-          };
-          EOF
-
-          # CREATE TVOS DEBUG COMPONENT
           cat > components/tvos/TVOSDebugger.tsx << 'EOF'
           import React, {useState, useEffect} from 'react';
           import {View, Text, Platform} from 'react-native';
@@ -206,7 +148,7 @@ jobs:
               const originalLog = console.log;
               console.log = (...args) => {
                 const message = args.join(' ');
-                if (message.includes('🎯 TVOS')) {
+                if (message.includes('TVOS')) {
                   setFocusInfo(message);
                 }
                 originalLog(...args);
@@ -238,70 +180,34 @@ jobs:
                 <Text style={{color: 'white', fontSize: 14, marginTop: 8}}>
                   {focusInfo}
                 </Text>
-                <Text style={{color: '#888', fontSize: 12, marginTop: 4}}>
-                  Platform.isTV: {Platform.isTV.toString()}
-                </Text>
-                <Text style={{color: '#888', fontSize: 12}}>
-                  Platform.isTVOS: {Platform.isTVOS?.toString() || 'false'}
-                </Text>
               </View>
             );
           };
           EOF
 
-          echo "✅ react-native-tvos components created!"
-
-      - name: Apply react-native-tvos modifications to source files
+      - name: Apply react-native-tvos modifications
         run: |
-          echo "📱 Applying react-native-tvos modifications..."
-          
-          # Update App.tsx with TVOS imports and components
           if [ -f "App.tsx" ]; then
-            # Add TVOS imports
-            sed -i '/import useDownloadsStore/a\\n// react-native-tvos imports\nimport {TVOSFocusable} from '\''./components/tvos/TVOSFocusable'\'';\nimport {TVOSNavigationGrid} from '\''./components/tvos/TVOSNavigationGrid'\'';\nimport {TVOSDebugger} from '\''./components/tvos/TVOSDebugger'\'';' App.tsx
-            
-            # Add TVOS debugger
+            sed -i '/import useDownloadsStore/a\\n// react-native-tvos imports\nimport {TVOSFocusable} from '\''./components/tvos/TVOSFocusable'\'';\nimport {TVOSDebugger} from '\''./components/tvos/TVOSDebugger'\'';' App.tsx
             sed -i 's/<NavigationContainer/<>\n        {Platform.isTV && <TVOSDebugger \/>}\n        <NavigationContainer/g' App.tsx
             sed -i 's/<\/NavigationContainer>/<\/NavigationContainer>\n      <\/>/g' App.tsx
-            
-            # Wrap main navigation in TVOS grid
-            sed -i 's/<SafeAreaProvider>/<SafeAreaProvider>\n      <TVOSNavigationGrid autoFocus>/g' App.tsx
-            sed -i 's/<\/SafeAreaProvider>/<\/TVOSNavigationGrid>\n    <\/SafeAreaProvider>/g' App.tsx
           fi
 
-          # Update all TouchableOpacity imports to use react-native instead of react-native-tvos for compatibility
-          find . -name "*.tsx" -o -name "*.ts" | grep -E "(screens|components)" | while read file; do
+          find . -name "*.tsx" -path "./screens/*" -o -path "./components/*" | while read file; do
             if [ -f "$file" ] && ! grep -q "tvos/" "$file"; then
-              echo "Updating $file for TVOS..."
-              
-              # Add TVOS import
               if ! grep -q "TVOSFocusable" "$file"; then
-                sed -i "/import.*from 'react'/a import {TVOSFocusable} from '../components/tvos/TVOSFocusable' || './tvos/TVOSFocusable';" "$file" 2>/dev/null || true
+                sed -i "/import.*from 'react'/a import {TVOSFocusable} from '../components/tvos/TVOSFocusable';" "$file" 2>/dev/null || true
               fi
-              
-              # Replace TouchableOpacity with TVOSFocusable
               sed -i 's/TouchableOpacity/TVOSFocusable/g' "$file"
-              
-              # Add TV-specific font sizes
-              sed -i 's/fontSize: 24/fontSize: Platform.isTV ? 32 : 24/g' "$file"
-              sed -i 's/fontSize: 18/fontSize: Platform.isTV ? 24 : 18/g' "$file"
-              sed -i 's/fontSize: 16/fontSize: Platform.isTV ? 20 : 16/g' "$file"
-              sed -i 's/fontSize: 14/fontSize: Platform.isTV ? 16 : 14/g' "$file"
             fi
           done
 
-          echo "✅ All files updated for react-native-tvos!"
-
-      - name: Setup keystore from GitHub secrets
+      - name: Setup keystore
         run: |
-          echo "🔑 Setting up keystore from GitHub secrets..."
           echo "${{ secrets.SIGNINGKEYBASE64 }}" | base64 --decode > android/app/keystore.jks
 
-      - name: Apply Android TV configuration for react-native-tvos
+      - name: Apply Android TV configuration
         run: |
-          echo "📱 Applying Android TV configuration for react-native-tvos..."
-
-          # Update AndroidManifest.xml for TV
           cp android/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml.backup
 
           cat > android/app/src/main/AndroidManifest.xml << 'EOF'
@@ -365,18 +271,10 @@ jobs:
           </manifest>
           EOF
 
-          # Update build.gradle for react-native-tvos with armeabi-v7a
           if [ -f "android/app/build.gradle" ]; then
-            # Update version name
             sed -i 's/versionName "3.1.0"/versionName "3.1.0-tvos-armv7"/g' android/app/build.gradle
-            
-            # Add armeabi-v7a architecture filter and TV configs
-            sed -i '/versionName.*"3.1.0-tvos-armv7"/a\        \n        // react-native-tvos armeabi-v7a configuration\n        resConfigs "en"\n        vectorDrawables.useSupportLibrary = true\n        \n        ndk {\n            abiFilters "armeabi-v7a"\n        }' android/app/build.gradle
-            
-            # Add keystore signing configuration
+            sed -i '/versionName.*"3.1.0-tvos-armv7"/a\        ndk {\n            abiFilters "armeabi-v7a"\n        }' android/app/build.gradle
             sed -i '/android {/a\    signingConfigs {\n        release {\n            storeFile file("keystore.jks")\n            storePassword System.getenv("SIGNING_STORE_PASSWORD")\n            keyAlias System.getenv("SIGNING_KEY_ALIAS")\n            keyPassword System.getenv("SIGNING_KEY_PASSWORD")\n        }\n    }' android/app/build.gradle
-            
-            # Update release buildType to use signing config
             sed -i '/buildTypes {/,/}/ {
               /release {/,/}/ {
                 /signingConfig/d
@@ -385,7 +283,6 @@ jobs:
             }' android/app/build.gradle
           fi
 
-          # Create searchable.xml
           mkdir -p android/app/src/main/res/xml
           cat > android/app/src/main/res/xml/searchable.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -395,16 +292,6 @@ jobs:
               android:searchMode="showSearchLabelAsBadge" />
           EOF
 
-          # Update strings.xml
-          if [ -f "android/app/src/main/res/values/strings.xml" ]; then
-            sed -i '/<\/resources>/i\    <string name="tv_app_name">Vega TVOS</string>\n    <string name="tv_banner_description">Vega - Movies and Series with react-native-tvos</string>' android/app/src/main/res/values/strings.xml
-          fi
-
-          echo "✅ react-native-tvos configuration applied!"
-
-      - name: Update package.json version
-        run: sed -i 's/"version": "3.1.0"/"version": "3.1.0-tvos-armv7"/g' package.json
-
       - name: Fix Gradle permissions
         run: chmod +x android/gradlew
 
@@ -413,41 +300,30 @@ jobs:
           cd android
           ./gradlew clean
 
-      - name: Build react-native-tvos armeabi-v7a APK
+      - name: Build react-native-tvos APK
         env:
           SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTOREPASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.KEYPASSWORD }}
         run: |
           cd android
-          ./gradlew assembleRelease -PreactNativeArchitectures=armeabi-v7a --no-daemon --warning-mode all
+          ./gradlew assembleRelease -PreactNativeArchitectures=armeabi-v7a --no-daemon
 
-      - name: Find and rename react-native-tvos APK
+      - name: Rename APK
         run: |
-          echo "🔍 Searching for react-native-tvos APK..."
-          
           cd android/app/build/outputs/apk/release
           ls -la
-          
-          APK_FILE=""
-          if [ -f "app-armeabi-v7a-release.apk" ]; then
-            APK_FILE="app-armeabi-v7a-release.apk"
-          elif [ -f "app-release.apk" ]; then
-            APK_FILE="app-release.apk"
-          else
-            APK_FILE=$(find . -name "*.apk" -type f | head -1)
-          fi
-          
+          APK_FILE=$(find . -name "*.apk" -type f | head -1)
           if [ -n "$APK_FILE" ]; then
             APK_FILE=$(basename "$APK_FILE")
             mv "$APK_FILE" "vega-tvos-armv7-v$(date +%Y%m%d-%H%M).apk"
-            echo "✅ Renamed to: vega-tvos-armv7-v$(date +%Y%m%d-%H%M).apk"
+            echo "Renamed to: vega-tvos-armv7-v$(date +%Y%m%d-%H%M).apk"
           else
-            echo "❌ No APK found"
+            echo "No APK found"
             exit 1
           fi
 
-      - name: Upload react-native-tvos APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: vega-tvos-armv7-apk
@@ -462,35 +338,26 @@ jobs:
           tag_name: tvos-armv7-v${{ github.run_number }}
           name: Vega TVOS ARMv7 v${{ github.run_number }}
           body: |
-            🎉 **Vega Android TV - react-native-tvos Build**
+            Vega Android TV - react-native-tvos Build
             
-            📱 **Built with react-native-tvos for superior TV experience**
-            ✅ **armeabi-v7a** - Optimized for your Android TV box
-            ✅ **TVFocusGuideView** - Native TV focus management
-            ✅ **Bright yellow focus indicators** - Highly visible on dark theme
-            ✅ **Auto-sync with main Vega app** - Always up to date
-            ✅ **Platform.isTV detection** - Proper TV/mobile separation
-            ✅ **Signed with your keystore** - Secure and trusted
+            Built with react-native-tvos for superior TV experience
+            - armeabi-v7a optimized for your Android TV box
+            - TVFocusGuideView for native TV focus management
+            - Bright yellow focus indicators visible on dark theme
+            - Auto-sync with main Vega app
+            - Platform.isTV detection for proper TV/mobile separation
+            - Signed with your personal keystore
             
-            📥 **Installation:**
+            Installation:
             1. Download the TVOS APK below
             2. Enable Unknown Sources on your Android TV
             3. Install and experience native TV navigation
             
-            🎮 **react-native-tvos Features:**
-            - **Native focus states** - Built-in `{focused}` styling
-            - **TVFocusGuideView** - Advanced focus control
-            - **autoFocus** - Programmatic focus management
-            - **trapFocus** - Prevent focus escape
-            - **Better performance** - TV-optimized rendering
-            - **Debug overlay** - Shows Platform.isTV and focus states
-            
-            🏗️ **Technical Details:**
-            - **Framework**: react-native-tvos (TV-optimized React Native)
-            - **Architecture**: armeabi-v7a only
-            - **Focus System**: Native TVFocusGuideView
-            - **Theme**: Optimized for dark backgrounds
-            - **Sync**: Auto-synced with Zenda-Cross/vega-app
+            react-native-tvos Features:
+            - Native focus states with built-in focused styling
+            - TVFocusGuideView for advanced focus control
+            - Better performance with TV-optimized rendering
+            - Debug overlay showing Platform.isTV status
           draft: false
           prerelease: false
 
@@ -502,8 +369,8 @@ jobs:
     steps:
       - name: Build Success
         if: needs.build-tvos-apk.result == 'success'
-        run: echo "✅ react-native-tvos ARMv7 APK built successfully!"
+        run: echo "react-native-tvos ARMv7 APK built successfully!"
         
       - name: Build Failed
         if: needs.build-tvos-apk.result == 'failure'
-        run: echo "❌ react-native-tvos build failed - check logs above"
+        run: echo "react-native-tvos build failed - check logs above"
