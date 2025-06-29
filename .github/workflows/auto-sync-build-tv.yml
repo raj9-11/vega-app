@@ -285,55 +285,26 @@ jobs:
           # Add TV navigation options
           sed -i 's/animation: '\''default'\''/animation: Platform.isTV ? '\''none'\'' : '\''default'\''/g' App.tsx
           sed -i '/headerShown: false,/a\            gestureEnabled: !Platform.isTV,' App.tsx
-          
-          # Replace tab bar buttons with TVFocusable
-          sed -i '/tabBarButton: props => {/,/},/ {
-            s/TouchableOpacity/TVFocusable/g
-            s/activeOpacity={0.8}/focusedStyle={{shadowColor: primary, shadowOffset: {width: 0, height: 0}, shadowOpacity: 0.8, shadowRadius: 15, elevation: 15}}/g
-          }' App.tsx
         fi
 
         # UPDATE ALL SRC FILES WITH TV MODIFICATIONS
         echo "📱 Applying TV modifications to ALL src files..."
         
-        # Function to safely add import if not exists
-        add_import_if_missing() {
-          local file="$1"
-          local import_line="$2"
-          if [ -f "$file" ] && ! grep -q "TVFocusable" "$file"; then
-            sed -i "/import.*from 'react'/a $import_line" "$file"
-          fi
-        }
-        
-        # Function to replace TouchableOpacity with TVFocusable
-        replace_touchable() {
-          local file="$1"
-          if [ -f "$file" ]; then
-            sed -i 's/TouchableOpacity/TVFocusable/g' "$file"
-            sed -i 's/activeOpacity={[^}]*}/focusedStyle={{shadowColor: primary, shadowOffset: {width: 0, height: 0}, shadowOpacity: 0.8, shadowRadius: 15, elevation: 15}}/g' "$file"
-          fi
-        }
-        
-        # Function to add TV sizing
-        add_tv_sizing() {
-          local file="$1"
-          if [ -f "$file" ]; then
-            sed -i 's/fontSize: 24/fontSize: Platform.isTV ? 32 : 24/g' "$file"
-            sed -i 's/fontSize: 20/fontSize: Platform.isTV ? 28 : 20/g' "$file"
-            sed -i 's/fontSize: 18/fontSize: Platform.isTV ? 24 : 18/g' "$file"
-            sed -i 's/fontSize: 16/fontSize: Platform.isTV ? 20 : 16/g' "$file"
-            sed -i 's/fontSize: 14/fontSize: Platform.isTV ? 16 : 14/g' "$file"
-            sed -i 's/fontSize: 12/fontSize: Platform.isTV ? 14 : 12/g' "$file"
-          fi
-        }
-        
         # Update all screen files
         for file in screens/*.tsx screens/*/*.tsx; do
           if [ -f "$file" ]; then
             echo "Updating $file..."
-            add_import_if_missing "$file" "import {TVFocusable} from '../components/tv/TVFocusable';"
-            replace_touchable "$file"
-            add_tv_sizing "$file"
+            # Add TVFocusable import if not exists
+            if ! grep -q "TVFocusable" "$file"; then
+              sed -i "/import.*from 'react'/a import {TVFocusable} from '../components/tv/TVFocusable';" "$file"
+            fi
+            # Replace TouchableOpacity with TVFocusable
+            sed -i 's/TouchableOpacity/TVFocusable/g' "$file"
+            # Add TV sizing
+            sed -i 's/fontSize: 24/fontSize: Platform.isTV ? 32 : 24/g' "$file"
+            sed -i 's/fontSize: 18/fontSize: Platform.isTV ? 24 : 18/g' "$file"
+            sed -i 's/fontSize: 16/fontSize: Platform.isTV ? 20 : 16/g' "$file"
+            sed -i 's/fontSize: 14/fontSize: Platform.isTV ? 16 : 14/g' "$file"
           fi
         done
         
@@ -341,17 +312,24 @@ jobs:
         for file in components/*.tsx components/*/*.tsx; do
           if [ -f "$file" ] && [[ "$file" != *"tv/"* ]]; then
             echo "Updating $file..."
-            add_import_if_missing "$file" "import {TVFocusable} from './tv/TVFocusable';"
-            replace_touchable "$file"
-            add_tv_sizing "$file"
+            # Add TVFocusable import if not exists
+            if ! grep -q "TVFocusable" "$file"; then
+              sed -i "/import.*from 'react'/a import {TVFocusable} from './tv/TVFocusable';" "$file"
+            fi
+            # Replace TouchableOpacity with TVFocusable
+            sed -i 's/TouchableOpacity/TVFocusable/g' "$file"
+            # Add TV sizing
+            sed -i 's/fontSize: 18/fontSize: Platform.isTV ? 24 : 18/g' "$file"
+            sed -i 's/fontSize: 16/fontSize: Platform.isTV ? 20 : 16/g' "$file"
+            sed -i 's/fontSize: 14/fontSize: Platform.isTV ? 16 : 14/g' "$file"
           fi
         done
         
         echo "✅ All src files updated with TV modifications!"
 
-    - name: Apply complete TV configuration
+    - name: Apply complete TV configuration with RN 0.74.1 memory fix
       run: |
-        echo "📱 Applying complete TV configuration..."
+        echo "📱 Applying complete TV configuration with RN 0.74.1 memory optimization..."
         
         # UPDATE ANDROID MANIFEST FOR TV
         cp android/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml.backup
@@ -468,13 +446,59 @@ jobs:
         </manifest>
         EOF
         
-        # UPDATE BUILD.GRADLE FOR TV (FIXED SYNTAX)
+        # CREATE ENHANCED GRADLE.PROPERTIES WITH RN 0.74.1 MEMORY FIX
+        cat > android/gradle.properties << 'EOF'
+        # Project-wide Gradle settings.
+        android.useAndroidX=true
+        android.enableJetifier=true
+        
+        # Enhanced memory optimization for React Native 0.74.1 + Hermes (based on search results)
+        org.gradle.jvmargs=-Xmx8g -XX:MaxMetaspaceSize=2g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8 -XX:+UseG1GC
+        org.gradle.parallel=false
+        org.gradle.configureondemand=false
+        org.gradle.daemon=true
+        org.gradle.caching=true
+        
+        # React Native optimization
+        FLIPPER_VERSION=0.125.0
+        
+        # Disable unnecessary features for TV builds
+        android.enableR8.fullMode=false
+        android.enableBuildCache=true
+        android.enableIncrementalDesugaring=false
+        
+        # Jetifier optimization (ignore problematic libraries)
+        android.jetifier.ignorelist=play-services-cast-framework,media3-ui,media3-session
+        EOF
+        
+        # UPDATE BUILD.GRADLE FOR TV WITH ENHANCED MEMORY SETTINGS
         if [ -f "android/app/build.gradle" ]; then
           # Add TV version suffix
           sed -i 's/versionName "3.1.0"/versionName "3.1.0-tv"/g' android/app/build.gradle
           
-          # Add TV-specific configs in the correct location (fixed resConfigs syntax)
+          # Add TV-specific configs
           sed -i '/versionName.*"3.1.0-tv"/a\        \n        // TV-specific configurations\n        resConfigs "en"\n        vectorDrawables.useSupportLibrary = true' android/app/build.gradle
+          
+          # Fix signing config - use debug signing for release builds
+          sed -i '/buildTypes {/,/}/ {
+            /release {/,/}/ {
+              s/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/
+            }
+          }' android/app/build.gradle
+          
+          # Add enhanced dexOptions for memory optimization
+          sed -i '/android {/a\    dexOptions {\n        javaMaxHeapSize "6g"\n        preDexLibraries false\n        incremental false\n    }' android/app/build.gradle
+          
+          # Add packagingOptions to handle conflicts
+          sed -i '/android {/a\    packagingOptions {\n        pickFirst "**/libc++_shared.so"\n        pickFirst "**/libjsc.so"\n        pickFirst "**/libhermes.so"\n    }' android/app/build.gradle
+        fi
+        
+        # FIX ANDROID BUILD.GRADLE FOR EXCLUSIVE REACT NATIVE REPOSITORY (from search results)
+        if [ -f "android/build.gradle" ]; then
+          # Add exclusive content for React Native to prevent version conflicts
+          sed -i '/allprojects {/,/}/ {
+            /repositories {/a\        exclusiveContent {\n            filter { includeGroup "com.facebook.react" }\n            forRepository {\n                maven { url "$rootDir/../node_modules/react-native/android" }\n            }\n        }
+          }' android/build.gradle
         fi
         
         # CREATE SEARCHABLE.XML FOR TV SEARCH
@@ -492,15 +516,7 @@ jobs:
           sed -i '/<\/resources>/i\    <string name="tv_app_name">Vega TV</string>\n    <string name="tv_banner_description">Vega - Movies and Series for Android TV</string>' android/app/src/main/res/values/strings.xml
         fi
         
-        # CREATE TV BANNER DRAWABLE
-        mkdir -p android/app/src/main/res/drawable
-        cat > android/app/src/main/res/drawable/tv_banner.xml << 'EOF'
-        <?xml version="1.0" encoding="utf-8"?>
-        <bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-            android:src="@mipmap/ic_launcher" />
-        EOF
-        
-        echo "✅ Complete TV configuration applied!"
+        echo "✅ Complete TV configuration with RN 0.74.1 memory optimization applied!"
 
     - name: Update package.json version for TV
       run: |
@@ -509,20 +525,24 @@ jobs:
     - name: Fix Gradle permissions
       run: chmod +x android/gradlew
 
-    - name: Clean project
+    - name: Clean project with maximum memory allocation
       run: |
         cd android
+        export GRADLE_OPTS="-Xmx8g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC"
+        export _JAVA_OPTIONS="-Xmx8g"
         ./gradlew clean
 
-    - name: Build Android TV APK
+    - name: Build Android TV APK with enhanced memory settings for RN 0.74.1
       run: |
         cd android
-        ./gradlew assembleDebug --no-daemon --warning-mode all
+        export GRADLE_OPTS="-Xmx8g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions"
+        export _JAVA_OPTIONS="-Xmx8g"
+        ./gradlew assembleRelease --no-daemon --warning-mode all --max-workers=1 --no-parallel --build-cache
 
     - name: Rename APK with TV suffix
       run: |
         cd android/app/build/outputs/apk/release
-        mv app-release.apk vega-android-tv-v$(date +%Y%m%d-%H%M).apk
+        mv app-release.apk vega-android-tv-release-v$(date +%Y%m%d-%H%M).apk
 
     - name: Upload TV APK
       uses: actions/upload-artifact@v4
@@ -537,18 +557,19 @@ jobs:
       with:
         files: android/app/build/outputs/apk/release/vega-android-tv-*.apk
         tag_name: tv-auto-v${{ github.run_number }}
-        name: Vega Android TV Auto-Build v${{ github.run_number }}
+        name: Vega Android TV Memory-Optimized Build v${{ github.run_number }}
         body: |
-          🎉 **Vega Android TV - Complete Enhanced Build**
+          🎉 **Vega Android TV - Memory Optimized for RN 0.74.1**
           
-          📱 **What's Updated:**
+          📱 **What's Fixed:**
+          - ✅ Resolved Java heap space error with Hermes
+          - ✅ Enhanced memory allocation for RN 0.74.1
+          - ✅ Exclusive React Native repository configuration
           - ✅ ALL src files modified for TV support
           - ✅ Complete D-pad navigation system
           - ✅ TV-optimized UI with focus indicators  
           - ✅ Remote control compatibility
           - ✅ Leanback launcher integration
-          - ✅ TV search functionality
-          - ✅ Optimized build configuration
           - ✅ Auto-synced with latest upstream changes
           
           📥 **Installation:**
@@ -559,21 +580,16 @@ jobs:
           🎮 **TV Features:**
           - Complete D-pad navigation throughout app
           - Visual focus indicators on all interactive elements
-          - TV launcher support with proper banner
+          - TV launcher support
           - Remote control friendly interface
           - TV-optimized sizing and spacing
-          - Auto-scrolling for focused items
-          - Search integration with Android TV
-          - Landscape orientation optimized
           
-          🔧 **Technical Improvements:**
-          - Enhanced AndroidManifest.xml for TV
-          - Optimized build.gradle configuration
-          - TV-specific resource configurations
-          - Search functionality integration
-          - Performance optimizations for TV hardware
-          
-          🔄 **Auto-Sync:** This build automatically includes the latest changes from the original Vega-App repository with complete TV modifications applied to ALL components.
+          🔧 **Memory Optimizations:**
+          - 8GB JVM heap allocation
+          - G1 garbage collector
+          - Disabled parallel processing
+          - Exclusive React Native repository
+          - Enhanced dex options
         draft: false
         prerelease: false
 
@@ -586,9 +602,9 @@ jobs:
     - name: Build Success Notification
       if: needs.build-tv-apk.result == 'success'
       run: |
-        echo "✅ Enhanced Android TV APK with ALL modifications built successfully!"
+        echo "✅ Memory-optimized Android TV APK for RN 0.74.1 built successfully!"
         echo "📱 Download from the Actions tab or Releases page"
-        echo "🎮 Features: Complete TV navigation, focus management, and optimization"
+        echo "🎮 Features: Complete TV navigation with RN 0.74.1 memory fixes"
         
     - name: Build Failed Notification  
       if: needs.build-tv-apk.result == 'failure'
