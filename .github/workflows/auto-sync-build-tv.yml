@@ -2,7 +2,7 @@ name: Auto-Sync and Build TV APK
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # Daily at 6 AM UTC
+    - cron: '0 6 * * *'
   workflow_dispatch:
     inputs:
       force_sync:
@@ -62,12 +62,21 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Set up JDK 17
+    # Increase available memory for the runner
+    - name: Configure system memory
+      run: |
+        sudo sysctl vm.max_map_count=262144
+        echo "Available memory:"
+        free -h
+
+    - name: Set up JDK 17 with increased memory
       uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
         cache: 'gradle'
+      env:
+        JAVA_OPTS: '-Xmx8g -XX:MaxMetaspaceSize=1g'
 
     - name: Setup Node.js 18
       uses: actions/setup-node@v4
@@ -78,9 +87,9 @@ jobs:
     - name: Install dependencies
       run: npm install
 
-    - name: Create TV-specific files and apply ALL modifications
+    - name: Create TV-specific files
       run: |
-        echo "🔄 Creating TV files and updating ALL src components..."
+        echo "🔄 Creating TV files..."
         
         # CREATE TV FOCUS HOOK
         mkdir -p hooks
@@ -106,12 +115,10 @@ jobs:
             if (Platform.isTV) {
               tvEventHandler.current = new TVEventHandler();
               tvEventHandler.current.enable(null, (cmp, evt) => {
-                console.log('TV Event:', evt.eventType);
                 if (evt.eventType === 'focus') {
                   currentFocusId.current = evt.tag?.toString() || null;
                 }
               });
-
               return () => {
                 if (tvEventHandler.current) {
                   tvEventHandler.current.disable();
@@ -138,12 +145,7 @@ jobs:
 
           return (
             <TVFocusContext.Provider 
-              value={{
-                registerFocusable, 
-                unregisterFocusable, 
-                setFocus, 
-                currentFocusId: currentFocusId.current
-              }}>
+              value={{registerFocusable, unregisterFocusable, setFocus, currentFocusId: currentFocusId.current}}>
               {children}
             </TVFocusContext.Provider>
           );
@@ -162,14 +164,7 @@ jobs:
         mkdir -p components/tv
         cat > components/tv/TVFocusable.tsx << 'EOF'
         import React, {useRef} from 'react';
-        import {
-          Pressable,
-          Animated,
-          ViewStyle,
-          PressableProps,
-          Platform,
-          TouchableOpacity,
-        } from 'react-native';
+        import {Pressable, Animated, ViewStyle, PressableProps, Platform, TouchableOpacity} from 'react-native';
 
         interface TVFocusableProps extends PressableProps {
           children: React.ReactNode;
@@ -184,87 +179,38 @@ jobs:
         }
 
         export const TVFocusable: React.FC<TVFocusableProps> = ({
-          children,
-          focusId,
-          style,
-          focusedStyle,
-          hasTVPreferredFocus = false,
-          onFocus,
-          onBlur,
-          className,
-          activeOpacity,
-          ...pressableProps
+          children, focusId, style, focusedStyle, hasTVPreferredFocus = false,
+          onFocus, onBlur, className, activeOpacity, ...pressableProps
         }) => {
           const scaleAnim = useRef(new Animated.Value(1)).current;
           const opacityAnim = useRef(new Animated.Value(0.8)).current;
 
           const handleFocus = () => {
             Animated.parallel([
-              Animated.spring(scaleAnim, {
-                toValue: 1.05,
-                useNativeDriver: true,
-                tension: 100,
-                friction: 8,
-              }),
-              Animated.timing(opacityAnim, {
-                toValue: 1,
-                duration: 200,
-                useNativeDriver: true,
-              }),
+              Animated.spring(scaleAnim, {toValue: 1.05, useNativeDriver: true, tension: 100, friction: 8}),
+              Animated.timing(opacityAnim, {toValue: 1, duration: 200, useNativeDriver: true}),
             ]).start();
             onFocus?.();
           };
 
           const handleBlur = () => {
             Animated.parallel([
-              Animated.spring(scaleAnim, {
-                toValue: 1,
-                useNativeDriver: true,
-                tension: 100,
-                friction: 8,
-              }),
-              Animated.timing(opacityAnim, {
-                toValue: 0.8,
-                duration: 200,
-                useNativeDriver: true,
-              }),
+              Animated.spring(scaleAnim, {toValue: 1, useNativeDriver: true, tension: 100, friction: 8}),
+              Animated.timing(opacityAnim, {toValue: 0.8, duration: 200, useNativeDriver: true}),
             ]).start();
             onBlur?.();
           };
 
-          const animatedStyle = {
-            transform: [{scale: scaleAnim}],
-            opacity: opacityAnim,
-          };
-
           if (!Platform.isTV) {
             if (activeOpacity !== undefined) {
-              return (
-                <TouchableOpacity 
-                  style={style} 
-                  className={className} 
-                  activeOpacity={activeOpacity}
-                  {...(pressableProps as any)}>
-                  {children}
-                </TouchableOpacity>
-              );
+              return <TouchableOpacity style={style} className={className} activeOpacity={activeOpacity} {...(pressableProps as any)}>{children}</TouchableOpacity>;
             }
-            return (
-              <Pressable style={style} className={className} {...pressableProps}>
-                {children}
-              </Pressable>
-            );
+            return <Pressable style={style} className={className} {...pressableProps}>{children}</Pressable>;
           }
 
           return (
-            <Pressable
-              style={style}
-              className={className}
-              hasTVPreferredFocus={hasTVPreferredFocus}
-              onFocus={handleFocus}
-              onBlur={handleBlur}
-              {...pressableProps}>
-              <Animated.View style={[animatedStyle, focusedStyle]}>
+            <Pressable style={style} className={className} hasTVPreferredFocus={hasTVPreferredFocus} onFocus={handleFocus} onBlur={handleBlur} {...pressableProps}>
+              <Animated.View style={[{transform: [{scale: scaleAnim}], opacity: opacityAnim}, focusedStyle]}>
                 {children}
               </Animated.View>
             </Pressable>
@@ -272,72 +218,43 @@ jobs:
         };
         EOF
 
-        # UPDATE APP.TSX WITH COMPLETE TV INTEGRATION
-        echo "📱 Updating App.tsx with TV support..."
-        if [ -f "App.tsx" ]; then
-          # Add TV imports after existing imports
-          sed -i '/import useDownloadsStore/a\\n// TV-specific imports\nimport {TVFocusProvider} from '\''./hooks/useTVFocus'\'';\nimport {TVFocusable} from '\''./components/tv/TVFocusable'\'';' App.tsx
-          
-          # Wrap NavigationContainer with TVFocusProvider
-          sed -i 's/<SafeAreaProvider>/<SafeAreaProvider>\n      <TVFocusProvider>/g' App.tsx
-          sed -i 's/<\/SafeAreaProvider>/<\/TVFocusProvider>\n    <\/SafeAreaProvider>/g' App.tsx
-          
-          # Add TV navigation options
-          sed -i 's/animation: '\''default'\''/animation: Platform.isTV ? '\''none'\'' : '\''default'\''/g' App.tsx
-          sed -i '/headerShown: false,/a\            gestureEnabled: !Platform.isTV,' App.tsx
-        fi
-
-        # UPDATE ALL SRC FILES WITH TV MODIFICATIONS
-        echo "📱 Applying TV modifications to ALL src files..."
-        
-        # Update all screen files
-        for file in screens/*.tsx screens/*/*.tsx; do
-          if [ -f "$file" ]; then
-            echo "Updating $file..."
-            # Add TVFocusable import if not exists
-            if ! grep -q "TVFocusable" "$file"; then
-              sed -i "/import.*from 'react'/a import {TVFocusable} from '../components/tv/TVFocusable';" "$file"
-            fi
-            # Replace TouchableOpacity with TVFocusable
-            sed -i 's/TouchableOpacity/TVFocusable/g' "$file"
-            # Add TV sizing
-            sed -i 's/fontSize: 24/fontSize: Platform.isTV ? 32 : 24/g' "$file"
-            sed -i 's/fontSize: 18/fontSize: Platform.isTV ? 24 : 18/g' "$file"
-            sed -i 's/fontSize: 16/fontSize: Platform.isTV ? 20 : 16/g' "$file"
-            sed -i 's/fontSize: 14/fontSize: Platform.isTV ? 16 : 14/g' "$file"
-          fi
-        done
-        
-        # Update all component files
-        for file in components/*.tsx components/*/*.tsx; do
-          if [ -f "$file" ] && [[ "$file" != *"tv/"* ]]; then
-            echo "Updating $file..."
-            # Add TVFocusable import if not exists
-            if ! grep -q "TVFocusable" "$file"; then
-              sed -i "/import.*from 'react'/a import {TVFocusable} from './tv/TVFocusable';" "$file"
-            fi
-            # Replace TouchableOpacity with TVFocusable
-            sed -i 's/TouchableOpacity/TVFocusable/g' "$file"
-            # Add TV sizing
-            sed -i 's/fontSize: 18/fontSize: Platform.isTV ? 24 : 18/g' "$file"
-            sed -i 's/fontSize: 16/fontSize: Platform.isTV ? 20 : 16/g' "$file"
-            sed -i 's/fontSize: 14/fontSize: Platform.isTV ? 16 : 14/g' "$file"
-          fi
-        done
-        
-        echo "✅ All src files updated with TV modifications!"
-
-    - name: Apply complete TV configuration with RN 0.74.1 memory fix
+    - name: Configure Gradle with maximum memory allocation
       run: |
-        echo "📱 Applying complete TV configuration with RN 0.74.1 memory optimization..."
+        echo "📱 Configuring Gradle for React Native 0.74.1 + Hermes..."
+        
+        # Create gradle.properties with optimized settings for RN 0.74.1
+        cat > android/gradle.properties << 'EOF'
+        android.useAndroidX=true
+        android.enableJetifier=true
+
+        # Maximum memory allocation for React Native 0.74.1 + Hermes
+        org.gradle.jvmargs=-Xmx10g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8
+        org.gradle.parallel=false
+        org.gradle.configureondemand=false
+        org.gradle.daemon=true
+        org.gradle.caching=true
+
+        # React Native optimization
+        FLIPPER_VERSION=0.125.0
+
+        # Memory optimization for large projects
+        android.enableR8.fullMode=false
+        android.enableBuildCache=false
+        android.enableIncrementalDesugaring=false
+
+        # Jetifier optimization - disable for problematic libraries
+        android.jetifier.ignorelist=hermes-android
+        EOF
+
+    - name: Apply TV configuration and build optimizations
+      run: |
+        echo "📱 Applying TV configuration with build optimizations..."
         
         # UPDATE ANDROID MANIFEST FOR TV
         cp android/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml.backup
         
-        # Create complete TV-optimized manifest
         cat > android/app/src/main/AndroidManifest.xml << 'EOF'
         <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-            <!-- Original permissions -->
             <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
             <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
             <uses-permission android:name="android.permission.INTERNET"/>
@@ -345,163 +262,71 @@ jobs:
             <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
             <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
             <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
-            
-            <!-- TV-specific permissions and features -->
             <uses-permission android:name="android.permission.WAKE_LOCK"/>
             
-            <!-- Declare this is a TV app -->
-            <uses-feature
-                android:name="android.software.leanback"
-                android:required="true" />
-            
-            <!-- Remove touch screen requirement for TV -->
-            <uses-feature
-                android:name="android.hardware.touchscreen"
-                android:required="false" />
-            
-            <!-- Optional gamepad support -->
-            <uses-feature
-                android:name="android.hardware.gamepad"
-                android:required="false" />
+            <uses-feature android:name="android.software.leanback" android:required="true" />
+            <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+            <uses-feature android:name="android.hardware.gamepad" android:required="false" />
 
-            <!-- Original queries -->
             <queries>
-                <intent>
-                    <action android:name="android.intent.action.VIEW"/>
-                    <data android:scheme="http"/>
-                </intent>
-                <intent>
-                    <action android:name="android.intent.action.VIEW"/>
-                    <data android:scheme="https"/>
-                </intent>
-                <intent>
-                    <action android:name="android.intent.action.VIEW"/>
-                    <data android:scheme="vlc"/>
-                </intent>
+                <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="http"/></intent>
+                <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent>
+                <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="vlc"/></intent>
             </queries>
 
-            <application 
-                android:name=".MainApplication" 
-                android:label="@string/app_name" 
-                android:icon="@mipmap/ic_launcher" 
-                android:roundIcon="@mipmap/ic_launcher_round"
-                android:banner="@mipmap/ic_launcher"
-                android:allowBackup="true" 
-                android:theme="@style/AppTheme" 
-                android:requestLegacyExternalStorage="true">
+            <application android:name=".MainApplication" android:label="@string/app_name" 
+                android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"
+                android:banner="@mipmap/ic_launcher" android:allowBackup="true" 
+                android:theme="@style/AppTheme" android:requestLegacyExternalStorage="true">
                 
-                <!-- Original meta-data -->
                 <meta-data android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME" android:value="com.reactnative.googlecast.GoogleCastOptionsProvider"/>
                 <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
                 <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
                 <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
                 
-                <!-- Original service -->
                 <service android:name="com.brentvatne.exoplayer.VideoPlaybackService" android:exported="false" android:foregroundServiceType="mediaPlayback">
-                    <intent-filter>
-                        <action android:name="androidx.media3.session.MediaSessionService"/>
-                    </intent-filter>
+                    <intent-filter><action android:name="androidx.media3.session.MediaSessionService"/></intent-filter>
                 </service>
                 
-                <!-- MODIFIED MainActivity for TV support -->
-                <activity 
-                    android:name=".MainActivity" 
-                    android:label="@string/app_name" 
+                <activity android:name=".MainActivity" android:label="@string/app_name" 
                     android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode" 
-                    android:launchMode="singleTask" 
-                    android:windowSoftInputMode="adjustResize" 
-                    android:exported="true" 
-                    android:theme="@style/BootTheme" 
-                    android:supportsPictureInPicture="true"
-                    android:screenOrientation="landscape">
+                    android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" 
+                    android:exported="true" android:theme="@style/BootTheme" 
+                    android:supportsPictureInPicture="true" android:screenOrientation="landscape">
                     
-                    <!-- TV Launcher Intent -->
                     <intent-filter>
                         <action android:name="android.intent.action.MAIN"/>
                         <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
                         <category android:name="android.intent.category.LAUNCHER"/>
                     </intent-filter>
-                    
-                    <!-- Original intent filter -->
                     <intent-filter>
                         <action android:name="android.intent.action.VIEW"/>
                         <category android:name="android.intent.category.DEFAULT"/>
                         <category android:name="android.intent.category.BROWSABLE"/>
                         <data android:scheme="com.vega"/>
                     </intent-filter>
-                    
-                    <!-- Search Intent for TV -->
-                    <intent-filter>
-                        <action android:name="android.intent.action.SEARCH"/>
-                    </intent-filter>
-                    
-                    <meta-data
-                        android:name="android.app.searchable"
-                        android:resource="@xml/searchable" />
+                    <intent-filter><action android:name="android.intent.action.SEARCH"/></intent-filter>
+                    <meta-data android:name="android.app.searchable" android:resource="@xml/searchable" />
                 </activity>
                 
-                <!-- Original Google Cast activity -->
                 <activity android:name="com.reactnative.googlecast.RNGCExpandedControllerActivity"/>
             </application>
         </manifest>
         EOF
         
-        # CREATE ENHANCED GRADLE.PROPERTIES WITH RN 0.74.1 MEMORY FIX
-        cat > android/gradle.properties << 'EOF'
-        # Project-wide Gradle settings.
-        android.useAndroidX=true
-        android.enableJetifier=true
-        
-        # Enhanced memory optimization for React Native 0.74.1 + Hermes (based on search results)
-        org.gradle.jvmargs=-Xmx8g -XX:MaxMetaspaceSize=2g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8 -XX:+UseG1GC
-        org.gradle.parallel=false
-        org.gradle.configureondemand=false
-        org.gradle.daemon=true
-        org.gradle.caching=true
-        
-        # React Native optimization
-        FLIPPER_VERSION=0.125.0
-        
-        # Disable unnecessary features for TV builds
-        android.enableR8.fullMode=false
-        android.enableBuildCache=true
-        android.enableIncrementalDesugaring=false
-        
-        # Jetifier optimization (ignore problematic libraries)
-        android.jetifier.ignorelist=play-services-cast-framework,media3-ui,media3-session
-        EOF
-        
-        # UPDATE BUILD.GRADLE FOR TV WITH ENHANCED MEMORY SETTINGS
+        # UPDATE BUILD.GRADLE WITH MEMORY OPTIMIZATIONS
         if [ -f "android/app/build.gradle" ]; then
-          # Add TV version suffix
           sed -i 's/versionName "3.1.0"/versionName "3.1.0-tv"/g' android/app/build.gradle
+          sed -i '/versionName.*"3.1.0-tv"/a\        resConfigs "en"\n        vectorDrawables.useSupportLibrary = true' android/app/build.gradle
           
-          # Add TV-specific configs
-          sed -i '/versionName.*"3.1.0-tv"/a\        \n        // TV-specific configurations\n        resConfigs "en"\n        vectorDrawables.useSupportLibrary = true' android/app/build.gradle
+          # Add memory optimization settings
+          sed -i '/android {/a\    dexOptions {\n        javaMaxHeapSize "8g"\n        preDexLibraries false\n        additionalParameters = ["--multi-dex"]\n    }' android/app/build.gradle
           
-          # Fix signing config - use debug signing for release builds
-          sed -i '/buildTypes {/,/}/ {
-            /release {/,/}/ {
-              s/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/
-            }
-          }' android/app/build.gradle
-          
-          # Add enhanced dexOptions for memory optimization
-          sed -i '/android {/a\    dexOptions {\n        javaMaxHeapSize "6g"\n        preDexLibraries false\n        incremental false\n    }' android/app/build.gradle
-          
-          # Add packagingOptions to handle conflicts
-          sed -i '/android {/a\    packagingOptions {\n        pickFirst "**/libc++_shared.so"\n        pickFirst "**/libjsc.so"\n        pickFirst "**/libhermes.so"\n    }' android/app/build.gradle
+          # Fix signing config
+          sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/g' android/app/build.gradle
         fi
         
-        # FIX ANDROID BUILD.GRADLE FOR EXCLUSIVE REACT NATIVE REPOSITORY (from search results)
-        if [ -f "android/build.gradle" ]; then
-          # Add exclusive content for React Native to prevent version conflicts
-          sed -i '/allprojects {/,/}/ {
-            /repositories {/a\        exclusiveContent {\n            filter { includeGroup "com.facebook.react" }\n            forRepository {\n                maven { url "$rootDir/../node_modules/react-native/android" }\n            }\n        }
-          }' android/build.gradle
-        fi
-        
-        # CREATE SEARCHABLE.XML FOR TV SEARCH
+        # Create searchable.xml
         mkdir -p android/app/src/main/res/xml
         cat > android/app/src/main/res/xml/searchable.xml << 'EOF'
         <?xml version="1.0" encoding="utf-8"?>
@@ -510,39 +335,54 @@ jobs:
             android:hint="Search movies and series"
             android:searchMode="showSearchLabelAsBadge" />
         EOF
+
+    - name: Apply TV modifications to source files
+      run: |
+        echo "📱 Applying TV modifications to source files..."
         
-        # UPDATE STRINGS.XML WITH TV STRINGS
-        if [ -f "android/app/src/main/res/values/strings.xml" ]; then
-          sed -i '/<\/resources>/i\    <string name="tv_app_name">Vega TV</string>\n    <string name="tv_banner_description">Vega - Movies and Series for Android TV</string>' android/app/src/main/res/values/strings.xml
+        # Update App.tsx
+        if [ -f "App.tsx" ]; then
+          sed -i '/import useDownloadsStore/a\\n// TV-specific imports\nimport {TVFocusProvider} from '\''./hooks/useTVFocus'\'';\nimport {TVFocusable} from '\''./components/tv/TVFocusable'\'';' App.tsx
+          sed -i 's/<SafeAreaProvider>/<SafeAreaProvider>\n      <TVFocusProvider>/g' App.tsx
+          sed -i 's/<\/SafeAreaProvider>/<\/TVFocusProvider>\n    <\/SafeAreaProvider>/g' App.tsx
+          sed -i 's/animation: '\''default'\''/animation: Platform.isTV ? '\''none'\'' : '\''default'\''/g' App.tsx
+          sed -i '/headerShown: false,/a\            gestureEnabled: !Platform.isTV,' App.tsx
         fi
         
-        echo "✅ Complete TV configuration with RN 0.74.1 memory optimization applied!"
+        # Update components with TV support
+        for file in screens/*.tsx screens/*/*.tsx components/*.tsx; do
+          if [ -f "$file" ] && [[ "$file" != *"tv/"* ]]; then
+            if grep -q "TouchableOpacity" "$file" && ! grep -q "TVFocusable" "$file"; then
+              sed -i "/import.*from 'react'/a import {TVFocusable} from '../components/tv/TVFocusable' || './tv/TVFocusable';" "$file" 2>/dev/null || true
+              sed -i 's/TouchableOpacity/TVFocusable/g' "$file"
+            fi
+          fi
+        done
 
-    - name: Update package.json version for TV
-      run: |
-        sed -i 's/"version": "3.1.0"/"version": "3.1.0-tv"/g' package.json
+    - name: Update package.json version
+      run: sed -i 's/"version": "3.1.0"/"version": "3.1.0-tv"/g' package.json
 
     - name: Fix Gradle permissions
       run: chmod +x android/gradlew
 
-    - name: Clean project with maximum memory allocation
+    - name: Clean project with maximum memory
       run: |
         cd android
-        export GRADLE_OPTS="-Xmx8g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC"
-        export _JAVA_OPTIONS="-Xmx8g"
+        export GRADLE_OPTS="-Xmx10g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC"
+        export _JAVA_OPTIONS="-Xmx10g"
         ./gradlew clean
 
-    - name: Build Android TV APK with enhanced memory settings for RN 0.74.1
+    - name: Build Android TV APK with enhanced memory settings
       run: |
         cd android
-        export GRADLE_OPTS="-Xmx8g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions"
-        export _JAVA_OPTIONS="-Xmx8g"
-        ./gradlew assembleRelease --no-daemon --warning-mode all --max-workers=1 --no-parallel --build-cache
+        export GRADLE_OPTS="-Xmx10g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC -XX:+UseStringDeduplication"
+        export _JAVA_OPTIONS="-Xmx10g"
+        ./gradlew assembleRelease --no-daemon --max-workers=1 --no-parallel --warning-mode=none
 
-    - name: Rename APK with TV suffix
+    - name: Rename APK
       run: |
         cd android/app/build/outputs/apk/release
-        mv app-release.apk vega-android-tv-release-v$(date +%Y%m%d-%H%M).apk
+        mv app-release.apk vega-android-tv-v$(date +%Y%m%d-%H%M).apk
 
     - name: Upload TV APK
       uses: actions/upload-artifact@v4
@@ -551,47 +391,22 @@ jobs:
         path: android/app/build/outputs/apk/release/vega-android-tv-*.apk
         retention-days: 30
 
-    - name: Create Release (if new version)
+    - name: Create Release
       if: needs.sync-upstream.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
       uses: softprops/action-gh-release@v1
       with:
         files: android/app/build/outputs/apk/release/vega-android-tv-*.apk
-        tag_name: tv-auto-v${{ github.run_number }}
-        name: Vega Android TV Memory-Optimized Build v${{ github.run_number }}
+        tag_name: tv-v${{ github.run_number }}
+        name: Vega Android TV v${{ github.run_number }}
         body: |
-          🎉 **Vega Android TV - Memory Optimized for RN 0.74.1**
+          🎉 **Vega Android TV - Memory Optimized Build**
           
-          📱 **What's Fixed:**
-          - ✅ Resolved Java heap space error with Hermes
-          - ✅ Enhanced memory allocation for RN 0.74.1
-          - ✅ Exclusive React Native repository configuration
-          - ✅ ALL src files modified for TV support
-          - ✅ Complete D-pad navigation system
-          - ✅ TV-optimized UI with focus indicators  
-          - ✅ Remote control compatibility
-          - ✅ Leanback launcher integration
-          - ✅ Auto-synced with latest upstream changes
+          ✅ Fixes React Native 0.74.1 + Hermes memory issues
+          ✅ Complete TV support with D-pad navigation
+          ✅ TV launcher integration
+          ✅ Auto-synced with upstream
           
-          📥 **Installation:**
-          1. Download the APK file below
-          2. Enable "Unknown Sources" on your Android TV
-          3. Install using a file manager or ADB
-          
-          🎮 **TV Features:**
-          - Complete D-pad navigation throughout app
-          - Visual focus indicators on all interactive elements
-          - TV launcher support
-          - Remote control friendly interface
-          - TV-optimized sizing and spacing
-          
-          🔧 **Memory Optimizations:**
-          - 8GB JVM heap allocation
-          - G1 garbage collector
-          - Disabled parallel processing
-          - Exclusive React Native repository
-          - Enhanced dex options
-        draft: false
-        prerelease: false
+          📥 Download APK and install on Android TV
 
   notify:
     needs: [sync-upstream, build-tv-apk]
@@ -599,15 +414,10 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Build Success Notification
+    - name: Build Success
       if: needs.build-tv-apk.result == 'success'
-      run: |
-        echo "✅ Memory-optimized Android TV APK for RN 0.74.1 built successfully!"
-        echo "📱 Download from the Actions tab or Releases page"
-        echo "🎮 Features: Complete TV navigation with RN 0.74.1 memory fixes"
+      run: echo "✅ Android TV APK built successfully!"
         
-    - name: Build Failed Notification  
+    - name: Build Failed  
       if: needs.build-tv-apk.result == 'failure'
-      run: |
-        echo "❌ Android TV APK build failed!"
-        echo "🔍 Check the logs above for errors"
+      run: echo "❌ Build failed - check logs above"
