@@ -215,9 +215,9 @@ jobs:
         };
         EOF
 
-    - name: Configure Gradle and apply TV modifications
+    - name: Configure Gradle and apply TV modifications with release signing
       run: |
-        echo "📱 Configuring for Android TV with memory optimization..."
+        echo "📱 Configuring for Android TV with release signing..."
         
         # Create optimized gradle.properties
         cat > android/gradle.properties << 'EOF'
@@ -231,6 +231,27 @@ jobs:
         FLIPPER_VERSION=0.125.0
         android.enableR8.fullMode=false
         android.enableBuildCache=false
+        EOF
+        
+        # Generate keystore for release signing
+        echo "🔑 Generating release keystore..."
+        keytool -genkey -v -keystore android/app/my-release-key.keystore \
+          -alias my-key-alias \
+          -keyalg RSA \
+          -keysize 2048 \
+          -validity 10000 \
+          -storepass android123 \
+          -keypass android123 \
+          -dname "CN=Vega TV, OU=Development, O=VegaApp, L=City, S=State, C=US"
+        
+        # Add keystore config to gradle.properties
+        cat >> android/gradle.properties << 'EOF'
+
+        # Release signing configuration
+        MYAPP_RELEASE_STORE_FILE=my-release-key.keystore
+        MYAPP_RELEASE_KEY_ALIAS=my-key-alias
+        MYAPP_RELEASE_STORE_PASSWORD=android123
+        MYAPP_RELEASE_KEY_PASSWORD=android123
         EOF
         
         # Update AndroidManifest.xml for TV
@@ -297,12 +318,27 @@ jobs:
         </manifest>
         EOF
         
-        # Update build.gradle
+        # Update build.gradle with proper signing configuration
         if [ -f "android/app/build.gradle" ]; then
+          # Add TV version suffix
           sed -i 's/versionName "3.1.0"/versionName "3.1.0-tv"/g' android/app/build.gradle
+          
+          # Add TV-specific configs
           sed -i '/versionName.*"3.1.0-tv"/a\        resConfigs "en"\n        vectorDrawables.useSupportLibrary = true' android/app/build.gradle
+          
+          # Add signing configuration before buildTypes
+          sed -i '/android {/a\    signingConfigs {\n        release {\n            if (project.hasProperty("MYAPP_RELEASE_STORE_FILE")) {\n                storeFile file(MYAPP_RELEASE_STORE_FILE)\n                storePassword MYAPP_RELEASE_STORE_PASSWORD\n                keyAlias MYAPP_RELEASE_KEY_ALIAS\n                keyPassword MYAPP_RELEASE_KEY_PASSWORD\n            }\n        }\n    }' android/app/build.gradle
+          
+          # Update release buildType to use signing config
+          sed -i '/buildTypes {/,/}/ {
+            /release {/,/}/ {
+              /signingConfig/d
+              a\            signingConfig signingConfigs.release
+            }
+          }' android/app/build.gradle
+          
+          # Add memory optimization
           sed -i '/android {/a\    dexOptions {\n        javaMaxHeapSize "6g"\n        preDexLibraries false\n    }' android/app/build.gradle
-          sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/g' android/app/build.gradle
         fi
         
         # Create searchable.xml
@@ -355,7 +391,7 @@ jobs:
         export _JAVA_OPTIONS="-Xmx8g"
         ./gradlew clean
 
-    - name: Build Android TV APK
+    - name: Build Android TV Release APK
       run: |
         cd android
         export GRADLE_OPTS="-Xmx8g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC"
@@ -365,42 +401,49 @@ jobs:
     - name: Rename APK
       run: |
         cd android/app/build/outputs/apk/release
-        mv app-release.apk vega-android-tv-v$(date +%Y%m%d-%H%M).apk
+        mv app-release.apk vega-android-tv-release-v$(date +%Y%m%d-%H%M).apk
 
     - name: Upload TV APK
       uses: actions/upload-artifact@v4
       with:
-        name: vega-android-tv-apk
-        path: android/app/build/outputs/apk/release/vega-android-tv-*.apk
+        name: vega-android-tv-release-apk
+        path: android/app/build/outputs/apk/release/vega-android-tv-release-*.apk
         retention-days: 30
 
     - name: Create Release
       if: needs.sync-upstream.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
       uses: softprops/action-gh-release@v1
       with:
-        files: android/app/build/outputs/apk/release/vega-android-tv-*.apk
-        tag_name: tv-v${{ github.run_number }}
-        name: Vega Android TV v${{ github.run_number }}
+        files: android/app/build/outputs/apk/release/vega-android-tv-release-*.apk
+        tag_name: tv-release-v${{ github.run_number }}
+        name: Vega Android TV Release v${{ github.run_number }}
         body: |
-          🎉 **Vega Android TV - Complete Build**
+          🎉 **Vega Android TV - Proper Release Build**
           
-          ✅ Fixes React Native 0.74.1 + Hermes memory issues
-          ✅ Complete TV support with D-pad navigation
-          ✅ TV launcher integration with leanback support
-          ✅ Focus indicators and TV-optimized UI
-          ✅ Auto-synced with upstream Vega-App
+          ✅ **True Release APK** - Optimized, minified, and properly signed
+          ✅ **Complete TV Support** - Full D-pad navigation and focus management
+          ✅ **TV Launcher Integration** - Appears in Android TV home screen
+          ✅ **Memory Optimized** - Fixes React Native 0.74.1 + Hermes issues
+          ✅ **Auto-Synced** - Latest changes from upstream Vega-App
           
           📥 **Installation:**
-          1. Download the APK below
+          1. Download the release APK below
           2. Enable "Unknown Sources" on your Android TV
           3. Install using file manager or ADB
           
           🎮 **TV Features:**
-          - Complete D-pad navigation
-          - Visual focus indicators
-          - TV launcher support
-          - Remote control friendly
-          - TV-optimized sizing
+          - Complete D-pad navigation throughout app
+          - Visual focus indicators with animations
+          - TV launcher support with leanback integration
+          - Remote control friendly interface
+          - TV-optimized sizing and spacing
+          - Landscape orientation optimized
+          
+          🔑 **Release Build Benefits:**
+          - Smaller file size (minified code)
+          - Better performance (release optimizations)
+          - Proper code signing
+          - Production-ready quality
 
   notify:
     needs: [sync-upstream, build-tv-apk]
@@ -410,7 +453,7 @@ jobs:
     steps:
     - name: Build Success
       if: needs.build-tv-apk.result == 'success'
-      run: echo "✅ Android TV APK built successfully!"
+      run: echo "✅ Android TV Release APK built successfully!"
         
     - name: Build Failed  
       if: needs.build-tv-apk.result == 'failure'
