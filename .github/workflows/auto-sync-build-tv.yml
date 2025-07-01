@@ -61,19 +61,20 @@ jobs:
     name: Build Android TV APK
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Setup Node.js 18
         uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
+          cache-dependency-path: package-lock.json
 
       - name: Check Node.js version
         run: node --version
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
