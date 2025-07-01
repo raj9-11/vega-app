@@ -82,9 +82,16 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Clean npm cache and force glob@8
+        run: |
+          npm uninstall glob || true
+          npm cache clean --force
+          rm -rf node_modules/glob
+          rm -f package-lock.json
+          npm install --no-save glob@8
+
       - name: Patch all src files for TV navigation (auto-inject focusedStyle & accessibility)
         run: |
-          npm install --no-save glob@8
           node -e "
           const fs = require('fs');
           const glob = require('glob');
@@ -148,7 +155,6 @@ jobs:
           sed -i '/<application /a\    <uses-feature android:name="android.software.leanback" android:required="true" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <uses-feature android:name="android.hardware.gamepad" android:required="false" />' android/app/src/main/AndroidManifest.xml
           sed -i '/<activity android:name=".MainActivity"/,/android:theme="@style\/BootTheme"/ s/android:theme="@style\/BootTheme"/android:theme="@style\/BootTheme"\nandroid:supportsPictureInPicture="true"\nandroid:screenOrientation="landscape"/' android/app/src/main/AndroidManifest.xml
           sed -i '/<category android:name="android.intent.category.LAUNCHER"/a\        <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>' android/app/src/main/AndroidManifest.xml
-
           sed -i '/splits {/a\
               abi {\
                   enable true\
@@ -156,7 +162,6 @@ jobs:
                   include "armeabi-v7a"\
                   universalApk false\
               }' android/app/build.gradle
-
           sed -i '/buildTypes {/,/}/ {
             /release {/,/}/ {
               /signingConfig/d
