@@ -84,7 +84,7 @@ jobs:
 
       - name: Patch all src files for TV navigation (auto-inject focusedStyle & accessibility)
         run: |
-          npm install --no-save glob
+          npm install --no-save glob@8
           node -e "
           const fs = require('fs');
           const glob = require('glob');
