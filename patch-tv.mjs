@@ -1,5 +1,5 @@
 import fs from 'fs';
-import glob from 'glob';
+import * as glob from 'glob';
 
 const focusedStyle = `{ borderColor: '#00BFFF', borderWidth: 3, borderRadius: 12, backgroundColor: 'rgba(0,191,255,0.08)', transform: [{ scale: 1.08 }], shadowColor: '#00BFFF', shadowRadius: 10, shadowOpacity: 0.7, elevation: 8 }`;
 const patterns = ['src/**/*.tsx', 'src/**/*.ts'];
