@@ -1,4 +1,4 @@
-name: Auto-Sync and Build TVOS APK
+name: Auto-Sync and Build TV APK
 
 on:
   schedule:
@@ -21,7 +21,7 @@ jobs:
     if: github.event.inputs.build_only != 'true'
     runs-on: ubuntu-latest
     name: Sync with Upstream Vega-App
-    
+
     steps:
       - name: Checkout your fork
         uses: actions/checkout@v4
@@ -46,16 +46,20 @@ jobs:
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
           fi
-
     outputs:
       has_changes: ${{ steps.sync_check.outputs.has_changes }}
 
-  build-tvos-apk:
+  build-tv-apk:
     needs: [sync-upstream]
-    if: always() && (needs.sync-upstream.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true' || github.event.inputs.build_only == 'true' || github.event_name == 'push')
+    if: >
+      always() &&
+      (needs.sync-upstream.outputs.has_changes == 'true' ||
+      github.event.inputs.force_sync == 'true' ||
+      github.event.inputs.build_only == 'true' ||
+      github.event_name == 'push')
     runs-on: ubuntu-latest
-    name: Build react-native-tvos APK
-    
+    name: Build Android TV APK
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -75,250 +79,138 @@ jobs:
           node-version: '18'
           cache: 'npm'
 
-      - name: Complete Gradle cache cleanup and dependency fix
+      - name: Install dependencies
+        run: npm install
+
+      - name: Patch all src files for TV navigation (auto-inject focusedStyle & accessibility)
         run: |
-          # Complete cleanup based on search results
-          rm -rf node_modules package-lock.json
-          rm -rf ~/.gradle
-          npm cache clean --force
-          
-          # Install with legacy peer deps
-          npm install --legacy-peer-deps
-          
-          # Remove react-native and install compatible react-native-tvos
-          npm uninstall react-native @react-native-community/cli @react-native-community/cli-platform-android
-          npm install react-native-tvos@0.74.1-0 --legacy-peer-deps
+          npm install --no-save glob
+          node -e "
+          const fs = require('fs');
+          const glob = require('glob');
+          const focusedStyle = `{ borderColor: '#00BFFF', borderWidth: 3, borderRadius: 12, backgroundColor: 'rgba(0,191,255,0.08)', transform: [{ scale: 1.08 }], shadowColor: '#00BFFF', shadowRadius: 10, shadowOpacity: 0.7, elevation: 8 }`;
+          const patterns = ['src/**/*.tsx', 'src/**/*.ts'];
+          patterns.forEach(pattern => {
+            glob.sync(pattern).forEach(file => {
+              let code = fs.readFileSync(file, 'utf8');
+              let orig = code;
+              let focusableCount = 0;
+              // Replace touchables
+              code = code.replace(/TouchableOpacity|TouchableNativeFeedback|Pressable/gi, 'TVFocusable');
+              // Remove overflow
+              code = code.replace(/overflow\\s*:\\s*['\"]hidden['\"],?/g, '');
+              code = code.replace(/\\boverflow-hidden\\b/g, '');
+              // Remove mobile-only props
+              code = code.replace(/\\s*activeOpacity\\s*=\\s*{[^}]*}/g, '');
+              code = code.replace(/\\s*underlayColor\\s*=\\s*{[^}]*}/g, '');
+              code = code.replace(/\\s*onLongPress\\s*=\\s*{[^}]*}/g, '');
+              // Add TVFocusable import if missing
+              if (!/TVFocusable/.test(code)) {
+                code = code.replace(/import.*from 'react'/, m => m + \"\\nimport { TVFocusable } from '../components/tv/TVFocusable';\");
+              }
+              // Inject focusedStyle and accessibility props
+              code = code.replace(/<TVFocusable([^>]*)>/g, (match, props) => {
+                let newProps = props;
+                if (!/focusedStyle\\s*=/.test(newProps)) newProps += ` focusedStyle={${focusedStyle}}`;
+                if (!/accessible\\s*=/.test(newProps)) newProps += ' accessible={true}';
+                if (!/accessibilityRole\\s*=/.test(newProps)) newProps += ' accessibilityRole=\"button\"';
+                if (!/onFocus\\s*=/.test(newProps)) newProps += ' onFocus={() => {}}';
+                if (!/onBlur\\s*=/.test(newProps)) newProps += ' onBlur={() => {}}';
+                if (focusableCount === 0 && !/hasTVPreferredFocus\\s*=/.test(newProps)) {
+                  newProps += ' hasTVPreferredFocus={true}';
+                }
+                focusableCount++;
+                return `<TVFocusable${newProps}>`;
+              });
+              code = code.replace(/<TVFocusable([^>]*)\\/>/g, (match, props) => {
+                let newProps = props;
+                if (!/focusedStyle\\s*=/.test(newProps)) newProps += ` focusedStyle={${focusedStyle}}`;
+                if (!/accessible\\s*=/.test(newProps)) newProps += ' accessible={true}';
+                if (!/accessibilityRole\\s*=/.test(newProps)) newProps += ' accessibilityRole=\"button\"';
+                if (!/onFocus\\s*=/.test(newProps)) newProps += ' onFocus={() => {}}';
+                if (!/onBlur\\s*=/.test(newProps)) newProps += ' onBlur={() => {}}';
+                if (focusableCount === 0 && !/hasTVPreferredFocus\\s*=/.test(newProps)) {
+                  newProps += ' hasTVPreferredFocus={true}';
+                }
+                focusableCount++;
+                return `<TVFocusable${newProps}/>`;
+              });
+              if (code !== orig) {
+                fs.writeFileSync(file, code, 'utf8');
+                console.log('Patched:', file);
+              }
+            });
+          });
+          "
 
-      - name: Fix Gradle version and deprecated features
+      - name: Patch AndroidManifest.xml and build.gradle for TV and armeabi-v7a
         run: |
-          echo "🔧 Fixing Gradle version compatibility..."
-          
-          # Update gradle-wrapper.properties to use compatible version (search result #5 recommendation)
-          cat > android/gradle/wrapper/gradle-wrapper.properties << 'EOF'
-          distributionBase=GRADLE_USER_HOME
-          distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-7.6-all.zip
-          zipStoreBase=GRADLE_USER_HOME
-          zipStorePath=wrapper/dists
-          EOF
-          
-          # Create gradle.properties without deprecated features
-          cat > android/gradle.properties << 'EOF'
-          # React Native and Android configuration
-          android.useAndroidX=true
-          android.enableJetifier=true
-          
-          # Memory optimization 
-          org.gradle.jvmargs=-Xmx8g -XX:MaxMetaspaceSize=2g -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8
-          org.gradle.parallel=false
-          org.gradle.configureondemand=false
-          org.gradle.daemon=true
-          org.gradle.caching=true
-          
-          # Remove deprecated properties
-          # android.enableIncrementalDesugaring=false (REMOVED - deprecated)
-          
-          # Flipper
-          FLIPPER_VERSION=0.125.0
-          
-          # Build optimizations
-          android.enableR8.fullMode=false
-          android.enableBuildCache=false
-          EOF
-          
-          # Fix react-native path issue
-          mkdir -p node_modules/react-native/ReactAndroid
-          if [ -d "node_modules/react-native-tvos/ReactAndroid" ]; then
-            cp -r node_modules/react-native-tvos/ReactAndroid/* node_modules/react-native/ReactAndroid/ 2>/dev/null || true
-          fi
-          
-          # Create minimal ReactAndroid gradle.properties if missing
-          cat > node_modules/react-native/ReactAndroid/gradle.properties << 'EOF'
-          # ReactAndroid gradle.properties for react-native-tvos
-          android.useAndroidX=true
-          android.enableJetifier=true
-          FLIPPER_VERSION=0.125.0
-          EOF
+          sed -i '/<application /a\    <uses-feature android:name="android.software.leanback" android:required="true" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <uses-feature android:name="android.hardware.gamepad" android:required="false" />' android/app/src/main/AndroidManifest.xml
+          sed -i '/<activity android:name=".MainActivity"/,/android:theme="@style\/BootTheme"/ s/android:theme="@style\/BootTheme"/android:theme="@style\/BootTheme"\nandroid:supportsPictureInPicture="true"\nandroid:screenOrientation="landscape"/' android/app/src/main/AndroidManifest.xml
+          sed -i '/<category android:name="android.intent.category.LAUNCHER"/a\        <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>' android/app/src/main/AndroidManifest.xml
 
-      - name: Update Android build configuration
-        run: |
-          # Update build.gradle (project level) with compatible versions
-          if [ -f "android/build.gradle" ]; then
-            # Comment out problematic react-native plugin references
-            sed -i 's/apply plugin: "com.facebook.react.rootproject"/\/\/ apply plugin: "com.facebook.react.rootproject"/' android/build.gradle
-            
-            # Update to compatible versions
-            sed -i 's/com.android.tools.build:gradle:[0-9.]*"/com.android.tools.build:gradle:7.4.2"/' android/build.gradle
-            sed -i 's/distributionUrl=.*gradle-[0-9.]*-all.zip/distributionUrl=https\\:\/\/services.gradle.org\/distributions\/gradle-7.6-all.zip/' android/gradle/wrapper/gradle-wrapper.properties
-          fi
+          sed -i '/splits {/a\
+              abi {\
+                  enable true\
+                  reset()\
+                  include "armeabi-v7a"\
+                  universalApk false\
+              }' android/app/build.gradle
 
-      - name: Create react-native-tvos components
-        run: |
-          mkdir -p components/tvos
-          cat > components/tvos/TVOSFocusable.tsx << 'EOF'
-          import React from 'react';
-          import {Pressable, ViewStyle, PressableProps, Platform} from 'react-native';
-
-          interface TVOSFocusableProps extends PressableProps {
-            children: React.ReactNode;
-            style?: ViewStyle;
-            focusedStyle?: ViewStyle;
-            hasTVPreferredFocus?: boolean;
-          }
-
-          export const TVOSFocusable: React.FC<TVOSFocusableProps> = ({
-            children, style, focusedStyle, hasTVPreferredFocus = false, ...pressableProps
-          }) => {
-            if (!Platform.isTV) {
-              return <Pressable style={style} {...pressableProps}>{children}</Pressable>;
+          sed -i '/buildTypes {/,/}/ {
+            /release {/,/}/ {
+              /signingConfig/d
+              a\            ndk {\n                abiFilters "armeabi-v7a"\n            }
             }
+          }' android/app/build.gradle
 
-            return (
-              <Pressable
-                style={({focused}) => [
-                  {
-                    borderWidth: focused ? 6 : 0,
-                    borderColor: focused ? '#FFFF00' : 'transparent',
-                    borderRadius: focused ? 8 : 0,
-                    backgroundColor: focused ? 'rgba(255, 255, 0, 0.3)' : 'transparent',
-                    transform: [{scale: focused ? 1.2 : 1}],
-                    shadowColor: focused ? '#FFFF00' : 'transparent',
-                    shadowOpacity: focused ? 1 : 0,
-                    shadowRadius: focused ? 30 : 0,
-                    shadowOffset: {width: 0, height: 0},
-                    elevation: focused ? 25 : 0,
-                  },
-                  style,
-                  focused && focusedStyle,
-                ]}
-                hasTVPreferredFocus={hasTVPreferredFocus}
-                onFocus={() => console.log('🎯 TVOS FOCUSED')}
-                onBlur={() => console.log('🎯 TVOS BLURRED')}
-                {...pressableProps}>
-                {children}
-              </Pressable>
-            );
-          };
-          EOF
-
-      - name: Apply source modifications
-        run: |
-          if [ -f "App.tsx" ]; then
-            sed -i '/import useDownloadsStore/a\\n// react-native-tvos imports\nimport {TVOSFocusable} from '\''./components/tvos/TVOSFocusable'\'';' App.tsx
-          fi
-
-          find . -name "*.tsx" -path "./screens/*" -o -path "./components/*" | while read file; do
-            if [ -f "$file" ] && ! grep -q "tvos/" "$file"; then
-              if ! grep -q "TVOSFocusable" "$file"; then
-                sed -i "/import.*from 'react'/a import {TVOSFocusable} from '../components/tvos/TVOSFocusable';" "$file" 2>/dev/null || true
-              fi
-              sed -i 's/TouchableOpacity/TVOSFocusable/g' "$file"
-            fi
-          done
-
-      - name: Setup keystore
+      - name: Setup keystore for signing
         run: |
           echo "${{ secrets.SIGNINGKEYBASE64 }}" | base64 --decode > android/app/keystore.jks
 
-      - name: Configure Android TV with fixed build.gradle
+      - name: Configure signingConfigs in build.gradle
         run: |
-          cp android/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml.backup
-
-          cat > android/app/src/main/AndroidManifest.xml << 'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.vega">
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
-              <uses-permission android:name="android.permission.INTERNET"/>
-              <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
-              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
-              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
-              <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
-              <uses-permission android:name="android.permission.WAKE_LOCK"/>
-              
-              <uses-feature android:name="android.software.leanback" android:required="true" />
-              <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
-              <uses-feature android:name="android.hardware.gamepad" android:required="false" />
-
-              <queries>
-                  <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="http"/></intent>
-                  <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent>
-                  <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="vlc"/></intent>
-              </queries>
-
-              <application android:name=".MainApplication" android:label="@string/app_name" 
-                  android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"
-                  android:banner="@mipmap/ic_launcher" android:allowBackup="true" 
-                  android:theme="@style/AppTheme" android:requestLegacyExternalStorage="true">
-                  
-                  <meta-data android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME" android:value="com.reactnative.googlecast.GoogleCastOptionsProvider"/>
-                  <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
-                  <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
-                  <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
-                  
-                  <service android:name="com.brentvatne.exoplayer.VideoPlaybackService" android:exported="false" android:foregroundServiceType="mediaPlayback">
-                      <intent-filter><action android:name="androidx.media3.session.MediaSessionService"/></intent-filter>
-                  </service>
-                  
-                  <activity android:name=".MainActivity" android:label="@string/app_name" 
-                      android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode" 
-                      android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" 
-                      android:exported="true" android:theme="@style/BootTheme" 
-                      android:supportsPictureInPicture="true" android:screenOrientation="landscape">
-                      
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                      <intent-filter>
-                          <action android:name="android.intent.action.VIEW"/>
-                          <category android:name="android.intent.category.DEFAULT"/>
-                          <category android:name="android.intent.category.BROWSABLE"/>
-                          <data android:scheme="com.vega"/>
-                      </intent-filter>
-                      <intent-filter><action android:name="android.intent.action.SEARCH"/></intent-filter>
-                      <meta-data android:name="android.app.searchable" android:resource="@xml/searchable" />
-                  </activity>
-                  
-                  <activity android:name="com.reactnative.googlecast.RNGCExpandedControllerActivity"/>
-              </application>
-          </manifest>
-          EOF
-
-          if [ -f "android/app/build.gradle" ]; then
-            sed -i 's/versionName "3.1.0"/versionName "3.1.0-tvos-gradle-fixed"/g' android/app/build.gradle
-            sed -i '/versionName.*"3.1.0-tvos-gradle-fixed"/a\        ndk {\n            abiFilters "armeabi-v7a"\n        }' android/app/build.gradle
-            sed -i '/android {/a\    signingConfigs {\n        release {\n            storeFile file("keystore.jks")\n            storePassword System.getenv("SIGNING_STORE_PASSWORD")\n            keyAlias System.getenv("SIGNING_KEY_ALIAS")\n            keyPassword System.getenv("SIGNING_KEY_PASSWORD")\n        }\n    }' android/app/build.gradle
-            sed -i '/buildTypes {/,/}/ {
-              /release {/,/}/ {
-                /signingConfig/d
-                a\            signingConfig signingConfigs.release
-              }
-            }' android/app/build.gradle
-          fi
+          sed -i '/android {/a\
+              signingConfigs {\
+                  release {\
+                      storeFile file("keystore.jks")\
+                      storePassword System.getenv("KEYSTOREPASSWORD")\
+                      keyAlias System.getenv("ALIAS")\
+                      keyPassword System.getenv("KEYPASSWORD")\
+                  }\
+              }' android/app/build.gradle
+          sed -i '/buildTypes {/,/}/ {
+            /release {/,/}/ {
+              /signingConfig/d
+              a\            signingConfig signingConfigs.release
+            }
+          }' android/app/build.gradle
 
       - name: Fix Gradle permissions
         run: chmod +x android/gradlew
 
-      - name: Build with compatible Gradle version
-        env:
-          SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTOREPASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.KEYPASSWORD }}
+      - name: Clean project
         run: |
           cd android
-          ./gradlew clean --warning-mode none
-          ./gradlew assembleRelease -PreactNativeArchitectures=armeabi-v7a --no-daemon --warning-mode none
+          ./gradlew clean
+
+      - name: Build armeabi-v7a APK
+        env:
+          KEYSTOREPASSWORD: ${{ secrets.KEYSTOREPASSWORD }}
+          ALIAS: ${{ secrets.ALIAS }}
+          KEYPASSWORD: ${{ secrets.KEYPASSWORD }}
+        run: |
+          cd android
+          ./gradlew assembleRelease -PreactNativeArchitectures=armeabi-v7a --no-daemon
 
       - name: Rename APK
         run: |
           cd android/app/build/outputs/apk/release
-          ls -la
           APK_FILE=$(find . -name "*.apk" -type f | head -1)
           if [ -n "$APK_FILE" ]; then
             APK_FILE=$(basename "$APK_FILE")
-            mv "$APK_FILE" "vega-tvos-gradle-fixed-armv7-v$(date +%Y%m%d-%H%M).apk"
-            echo "✅ Renamed to: vega-tvos-gradle-fixed-armv7-v$(date +%Y%m%d-%H%M).apk"
+            mv "$APK_FILE" "vega-tv-armv7-enhanced-v$(date +%Y%m%d-%H%M).apk"
+            echo "✅ Renamed to: vega-tv-armv7-enhanced-v$(date +%Y%m%d-%H%M).apk"
           else
             echo "❌ No APK found"
             exit 1
@@ -327,46 +219,49 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: vega-tvos-gradle-fixed-armv7-apk
-          path: android/app/build/outputs/apk/release/vega-tvos-gradle-fixed-armv7-*.apk
+          name: vega-tv-armv7-enhanced-apk
+          path: android/app/build/outputs/apk/release/vega-tv-armv7-enhanced-*.apk
           retention-days: 30
 
       - name: Create Release
         if: needs.sync-upstream.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
         uses: softprops/action-gh-release@v1
         with:
-          files: android/app/build/outputs/apk/release/vega-tvos-gradle-fixed-armv7-*.apk
-          tag_name: tvos-gradle-fixed-v${{ github.run_number }}
-          name: Vega TVOS Gradle Fixed v${{ github.run_number }}
+          files: android/app/build/outputs/apk/release/vega-tv-armv7-enhanced-*.apk
+          tag_name: tv-armv7-v${{ github.run_number }}
+          name: Vega TV ARMv7 Enhanced v${{ github.run_number }}
           body: |
-            Vega Android TV - react-native-tvos with Gradle Compatibility Fix
-            
-            Fixed Gradle 8.6 deprecated features and compatibility issues
-            - Downgraded to Gradle 7.6 for compatibility
-            - Removed deprecated android.enableIncrementalDesugaring
-            - Fixed ReactAndroid gradle.properties path issue
-            - armeabi-v7a optimized for Android TV boxes
-            - Enhanced focus indicators for dark themes
-            - Auto-sync with main Vega app maintained
-            - Signed with personal keystore
-            
-            Installation:
-            1. Download the Gradle-fixed TVOS APK below
-            2. Enable Unknown Sources on your Android TV
-            3. Install and experience enhanced TV navigation
+            🎉 Vega Android TV - ARMv7 Enhanced Focus Build
+
+            📱 Built specifically for armeabi-v7a Android TV boxes
+            ✅ Enhanced focus indicators with bright cyan borders  
+            ✅ Complete D-pad navigation system
+            ✅ TV launcher integration
+            ✅ Signed with your personal keystore
+
+            📥 Installation:
+            1. Download the ARMv7 APK below
+            2. Enable Unknown Sources on your Android TV  
+            3. Install using file manager or ADB
+
+            🎮 Enhanced Focus Features:
+            - Cyan borders - 6px thick, highly visible
+            - Scale animation - Items grow 15% when focused
+            - Glow effects - Shadow and elevation for depth
+            - Better contrast for TV viewing distance
           draft: false
           prerelease: false
 
   notify:
-    needs: [sync-upstream, build-tvos-apk]
+    needs: [sync-upstream, build-tv-apk]
     if: always()
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Build Success
-        if: needs.build-tvos-apk.result == 'success'
-        run: echo "✅ react-native-tvos with Gradle compatibility fix built successfully!"
-        
+        if: needs.build-tv-apk.result == 'success'
+        run: echo "✅ ARMv7 Android TV APK built successfully!"
+
       - name: Build Failed
-        if: needs.build-tvos-apk.result == 'failure'
-        run: echo "❌ react-native-tvos build failed - check logs above"
+        if: needs.build-tv-apk.result == 'failure'
+        run: echo "❌ Build failed - check logs above"
