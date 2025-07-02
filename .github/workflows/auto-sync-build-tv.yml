@@ -21,6 +21,7 @@ jobs:
     if: github.event.inputs.build_only != 'true'
     runs-on: ubuntu-latest
     name: Sync with Upstream Vega-App
+    
     steps:
       - name: Checkout your fork
         uses: actions/checkout@v4
@@ -45,20 +46,16 @@ jobs:
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
           fi
+
     outputs:
       has_changes: ${{ steps.sync_check.outputs.has_changes }}
 
   build-tv-apk:
     needs: [sync-upstream]
-    if: >
-      always() &&
-      (needs.sync-upstream.outputs.has_changes == 'true' ||
-      github.event.inputs.force_sync == 'true' ||
-      github.event.inputs.build_only == 'true' ||
-      github.event_name == 'push')
+    if: always() && (needs.sync-upstream.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true' || github.event.inputs.build_only == 'true' || github.event_name == 'push')
     runs-on: ubuntu-latest
     name: Build Android TV APK
-
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -71,9 +68,6 @@ jobs:
           node-version: '18'
           cache: 'npm'
           cache-dependency-path: package-lock.json
-
-      - name: Check Node.js version
-        run: node --version
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -88,7 +82,62 @@ jobs:
       - name: Install glob (ESM compatible)
         run: npm install --no-save glob
 
-      - name: Patch all src files for TV navigation (auto-inject focusedStyle & accessibility)
+      - name: Create TVFocusable component first
+        run: |
+          mkdir -p src/components/tv
+          cat > src/components/tv/TVFocusable.tsx << 'EOF'
+          import React from 'react';
+          import {Pressable, Platform, ViewStyle, PressableProps} from 'react-native';
+
+          interface TVFocusableProps extends PressableProps {
+            children: React.ReactNode;
+            style?: ViewStyle;
+            focusedStyle?: ViewStyle;
+            hasTVPreferredFocus?: boolean;
+          }
+
+          export const TVFocusable: React.FC<TVFocusableProps> = ({
+            children,
+            style,
+            focusedStyle,
+            hasTVPreferredFocus = false,
+            ...pressableProps
+          }) => {
+            if (!Platform.isTV) {
+              return (
+                <Pressable style={style} {...pressableProps}>
+                  {children}
+                </Pressable>
+              );
+            }
+
+            const defaultFocusedStyle = {
+              borderColor: '#00BFFF',
+              borderWidth: 4,
+              borderRadius: 12,
+              backgroundColor: 'rgba(0,191,255,0.15)',
+              transform: [{scale: 1.08}],
+              shadowColor: '#00BFFF',
+              shadowRadius: 15,
+              shadowOpacity: 0.8,
+              elevation: 10,
+            };
+
+            return (
+              <Pressable
+                style={({focused}) => [
+                  style,
+                  focused && (focusedStyle || defaultFocusedStyle)
+                ]}
+                hasTVPreferredFocus={hasTVPreferredFocus}
+                {...pressableProps}>
+                {children}
+              </Pressable>
+            );
+          };
+          EOF
+
+      - name: Apply safe TV patches
         run: node patch-tv.mjs
 
       - name: Upload patched source files
@@ -97,28 +146,21 @@ jobs:
           name: patched-src
           path: src/
 
-      - name: Patch AndroidManifest.xml and build.gradle for TV and armeabi-v7a
+      - name: Configure Android for TV and armeabi-v7a
         run: |
-          sed -i '/<application /a\    <uses-feature android:name="android.software.leanback" android:required="true" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <uses-feature android:name="android.hardware.gamepad" android:required="false" />' android/app/src/main/AndroidManifest.xml
-
-          sed -i '/<activity android:name=".MainActivity"/,/android:theme="@style\/BootTheme"/ s/android:theme="@style\/BootTheme"/android:theme="@style\/BootTheme"\nandroid:supportsPictureInPicture="true"\nandroid:screenOrientation="landscape"/' android/app/src/main/AndroidManifest.xml
-
-          sed -i '/<category android:name="android.intent.category.LAUNCHER"/a\        <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>' android/app/src/main/AndroidManifest.xml
-
-          sed -i '/splits {/a\
-          abi {\
-              enable true\
-              reset()\
-              include "armeabi-v7a"\
-              universalApk false\
-          }' android/app/build.gradle
-
-          sed -i '/buildTypes {/,/}/ {
-            /release {/,/}/ {
-              /signingConfig/d
-              a\            ndk {\n                abiFilters "armeabi-v7a"\n            }
-            }
-          }' android/app/build.gradle
+          echo "📱 Configuring Android for TV..."
+          
+          # Update AndroidManifest.xml for TV
+          cp android/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml.backup
+          
+          # Add TV features to manifest
+          sed -i '/<application/i\    <uses-feature android:name="android.software.leanback" android:required="true" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />' android/app/src/main/AndroidManifest.xml
+          
+          # Add leanback launcher category
+          sed -i '/<category android:name="android.intent.category.LAUNCHER"/a\                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />' android/app/src/main/AndroidManifest.xml
+          
+          # Configure build.gradle for armeabi-v7a
+          sed -i '/android {/a\    splits {\n        abi {\n            enable true\n            reset()\n            include "armeabi-v7a"\n            universalApk false\n        }\n    }' android/app/build.gradle
 
       - name: Setup keystore for signing
         run: |
@@ -126,15 +168,8 @@ jobs:
 
       - name: Configure signingConfigs in build.gradle
         run: |
-          sed -i '/android {/a\
-          signingConfigs {\
-            release {\
-                storeFile file("keystore.jks")\
-                storePassword System.getenv("KEYSTOREPASSWORD")\
-                keyAlias System.getenv("ALIAS")\
-                keyPassword System.getenv("KEYPASSWORD")\
-            }\
-          }' android/app/build.gradle
+          sed -i '/android {/a\    signingConfigs {\n        release {\n            storeFile file("keystore.jks")\n            storePassword System.getenv("KEYSTOREPASSWORD")\n            keyAlias System.getenv("ALIAS")\n            keyPassword System.getenv("KEYPASSWORD")\n        }\n    }' android/app/build.gradle
+          
           sed -i '/buildTypes {/,/}/ {
             /release {/,/}/ {
               /signingConfig/d
@@ -165,8 +200,8 @@ jobs:
           APK_FILE=$(find . -name "*.apk" -type f | head -1)
           if [ -n "$APK_FILE" ]; then
             APK_FILE=$(basename "$APK_FILE")
-            mv "$APK_FILE" "vega-tv-armv7-enhanced-v$(date +%Y%m%d-%H%M).apk"
-            echo "✅ Renamed to: vega-tv-armv7-enhanced-v$(date +%Y%m%d-%H%M).apk"
+            mv "$APK_FILE" "vega-tv-armv7-fixed-v$(date +%Y%m%d-%H%M).apk"
+            echo "✅ Renamed to: vega-tv-armv7-fixed-v$(date +%Y%m%d-%H%M).apk"
           else
             echo "❌ No APK found"
             exit 1
@@ -175,46 +210,37 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: vega-tv-armv7-enhanced-apk
-          path: android/app/build/outputs/apk/release/vega-tv-armv7-enhanced-*.apk
+          name: vega-tv-armv7-fixed-apk
+          path: android/app/build/outputs/apk/release/vega-tv-armv7-fixed-*.apk
           retention-days: 30
 
       - name: Create Release
         if: needs.sync-upstream.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
         uses: softprops/action-gh-release@v1
         with:
-          files: android/app/build/outputs/apk/release/vega-tv-armv7-enhanced-*.apk
-          tag_name: tv-armv7-v${{ github.run_number }}
-          name: Vega TV ARMv7 Enhanced v${{ github.run_number }}
+          files: android/app/build/outputs/apk/release/vega-tv-armv7-fixed-*.apk
+          tag_name: tv-armv7-fixed-v${{ github.run_number }}
+          name: Vega TV ARMv7 Fixed v${{ github.run_number }}
           body: |
-            🎉 Vega Android TV - ARMv7 Enhanced Focus Build
-
-            📱 Built specifically for armeabi-v7a Android TV boxes
-
-            ✅ Enhanced focus indicators with bright cyan borders
-
-            ✅ Complete D-pad navigation system
-
-            ✅ TV launcher integration
-
-            ✅ Signed with your personal keystore
-
-            📥 Installation:
-
-            1. Download the ARMv7 APK below
-
+            🎉 Vega Android TV - ARMv7 JSX Syntax Fixed
+            
+            ✅ **Fixed JSX syntax errors** - Proper TVFocusable component
+            ✅ **Built for armeabi-v7a** - Optimized for Android TV boxes
+            ✅ **Enhanced focus indicators** - Bright cyan borders with glow
+            ✅ **Complete D-pad navigation** - Native TV-friendly interface
+            ✅ **TV launcher integration** - Leanback support
+            ✅ **Signed with your keystore** - Ready for installation
+            
+            📥 **Installation:**
+            1. Download the fixed APK below
             2. Enable Unknown Sources on your Android TV
-
             3. Install using file manager or ADB
-
-            🎮 Enhanced Focus Features:
-
-            - Cyan borders - 6px thick, highly visible
-
-            - Scale animation - Items grow 15% when focused
-
-            - Glow effects - Shadow and elevation for depth
-
+            
+            🎮 **Enhanced Focus Features:**
+            - Bright cyan borders (4px thick)
+            - Scale animation (8% size increase)
+            - Glow effects with shadow and elevation
+            - Background tint when focused
             - Better contrast for TV viewing distance
           draft: false
           prerelease: false
@@ -223,11 +249,12 @@ jobs:
     needs: [sync-upstream, build-tv-apk]
     if: always()
     runs-on: ubuntu-latest
+    
     steps:
       - name: Build Success
         if: needs.build-tv-apk.result == 'success'
-        run: echo "✅ ARMv7 Android TV APK built successfully!"
-
+        run: echo "✅ ARMv7 Android TV APK with JSX fixes built successfully!"
+        
       - name: Build Failed
         if: needs.build-tv-apk.result == 'failure'
         run: echo "❌ Build failed - check logs above"
