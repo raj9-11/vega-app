@@ -39,9 +39,7 @@ for (const pattern of patterns) {
 
     // Patch TVFocusable tags to add missing props as separate attributes
     code = code.replace(/<TVFocusable([^>]*)>/g, (match, props) => {
-      // Avoid patching if already present
       let newProps = props || '';
-
       // Only add the prop if it's not already present
       if (!/focusedStyle\s*=/.test(newProps)) newProps += `\n  focusedStyle=${focusedStyle}`;
       if (!/\baccessible\s*=/.test(newProps)) newProps += `\n  accessible={true}`;
@@ -52,12 +50,10 @@ for (const pattern of patterns) {
         newProps += `\n  hasTVPreferredFocus={true}`;
       }
       focusableCount++;
-
       // Clean up spacing and ensure each prop is on its own line
       newProps = newProps.replace(/\s+/g, ' ').replace(/ \n/g, '\n').trim();
-
-      // Rebuild the tag with line breaks for readability
-      return `<TVFocusable${newProps}>`;
+      // Always ensure a space after <TVFocusable
+      return `<TVFocusable ${newProps}>`;
     });
 
     if (code !== orig) {
