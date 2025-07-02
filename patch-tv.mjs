@@ -24,9 +24,9 @@ for (const pattern of patterns) {
       code = code.replace(/import.*from 'react'/, m => m + "\nimport { TVFocusable } from '../components/tv/TVFocusable';");
     }
 
-    // Patch TVFocusable tags to add missing props as separate attributes
-    code = code.replace(/<TVFocusable([^>]*)>/g, (match, props) => {
-      let newProps = props;
+    // Patch <TVFocusable ...> tags to add missing props as separate attributes
+    code = code.replace(/<TVFocusable([^/>]*)\/?>/g, (match, props) => {
+      let newProps = props || '';
 
       // Only add the prop if it's not already present
       if (!/focusedStyle\s*=/.test(newProps)) newProps += ` focusedStyle={${focusedStyle}}`;
@@ -38,21 +38,12 @@ for (const pattern of patterns) {
         newProps += ' hasTVPreferredFocus={true}';
       }
       focusableCount++;
-      return `<TVFocusable${newProps}>`;
-    });
-
-    code = code.replace(/<TVFocusable([^>]*)\/>/g, (match, props) => {
-      let newProps = props;
-      if (!/focusedStyle\s*=/.test(newProps)) newProps += ` focusedStyle={${focusedStyle}}`;
-      if (!/accessible\s*=/.test(newProps)) newProps += ' accessible={true}';
-      if (!/accessibilityRole\s*=/.test(newProps)) newProps += ' accessibilityRole="button"';
-      if (!/onFocus\s*=/.test(newProps)) newProps += ' onFocus={() => {}}';
-      if (!/onBlur\s*=/.test(newProps)) newProps += ' onBlur={() => {}}';
-      if (focusableCount === 0 && !/hasTVPreferredFocus\s*=/.test(newProps)) {
-        newProps += ' hasTVPreferredFocus={true}';
+      // Preserve whether it was self-closing or not
+      if (match.endsWith('/>')) {
+        return `<TVFocusable${newProps}/>`;
+      } else {
+        return `<TVFocusable${newProps}>`;
       }
-      focusableCount++;
-      return `<TVFocusable${newProps}/>`;
     });
 
     if (code !== orig) {
