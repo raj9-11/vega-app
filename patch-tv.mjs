@@ -9,6 +9,7 @@ for (const pattern of patterns) {
     let code = fs.readFileSync(file, 'utf8');
     let orig = code;
     let focusableCount = 0;
+
     // Replace touchables
     code = code.replace(/TouchableOpacity|TouchableNativeFeedback|Pressable/gi, 'TVFocusable');
     // Remove overflow
@@ -22,9 +23,12 @@ for (const pattern of patterns) {
     if (!/TVFocusable/.test(code)) {
       code = code.replace(/import.*from 'react'/, m => m + "\nimport { TVFocusable } from '../components/tv/TVFocusable';");
     }
-    // Inject focusedStyle and accessibility props
+
+    // Patch TVFocusable tags to add missing props as separate attributes
     code = code.replace(/<TVFocusable([^>]*)>/g, (match, props) => {
       let newProps = props;
+
+      // Only add the prop if it's not already present
       if (!/focusedStyle\s*=/.test(newProps)) newProps += ` focusedStyle={${focusedStyle}}`;
       if (!/accessible\s*=/.test(newProps)) newProps += ' accessible={true}';
       if (!/accessibilityRole\s*=/.test(newProps)) newProps += ' accessibilityRole="button"';
@@ -36,6 +40,7 @@ for (const pattern of patterns) {
       focusableCount++;
       return `<TVFocusable${newProps}>`;
     });
+
     code = code.replace(/<TVFocusable([^>]*)\/>/g, (match, props) => {
       let newProps = props;
       if (!/focusedStyle\s*=/.test(newProps)) newProps += ` focusedStyle={${focusedStyle}}`;
@@ -49,6 +54,7 @@ for (const pattern of patterns) {
       focusableCount++;
       return `<TVFocusable${newProps}/>`;
     });
+
     if (code !== orig) {
       fs.writeFileSync(file, code, 'utf8');
       console.log('Patched:', file);
