@@ -1,0 +1,214 @@
+name: Auto-Sync and Build TV APK
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_sync:
+        description: 'Force sync with upstream'
+        type: boolean
+        default: false
+      build_only:
+        description: 'Build APK without syncing'
+        type: boolean
+        default: false
+  push:
+    branches: [ main, master, android-tv-support ]
+
+jobs:
+  sync-upstream:
+    if: github.event.inputs.build_only != 'true'
+    runs-on: ubuntu-latest
+    name: Sync with Upstream Vega-App
+
+    steps:
+      - name: Checkout your fork
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Sync with upstream
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
+        with:
+          target_sync_branch: main
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
+          upstream_sync_branch: main
+          upstream_sync_repo: Zenda-Cross/vega-app
+          test_mode: false
+
+      - name: Check for new commits
+        id: sync_check
+        run: |
+          if git diff --quiet HEAD~1 HEAD; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+    outputs:
+      has_changes: ${{ steps.sync_check.outputs.has_changes }}
+
+  build-tv-apk:
+    needs: [sync-upstream]
+    if: >
+      always() &&
+      (needs.sync-upstream.outputs.has_changes == 'true' ||
+      github.event.inputs.force_sync == 'true' ||
+      github.event.inputs.build_only == 'true' ||
+      github.event_name == 'push')
+    runs-on: ubuntu-latest
+    name: Build Android TV APK
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Check Node.js version
+        run: node --version
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install glob (ESM compatible)
+        run: npm install --no-save glob
+
+      - name: Patch all src files for TV navigation (auto-inject focusedStyle & accessibility)
+        run: node patch-tv.mjs
+
+      - name: Patch AndroidManifest.xml and build.gradle for TV and armeabi-v7a
+        run: |
+          sed -i '/<application /a\    <uses-feature android:name="android.software.leanback" android:required="true" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <uses-feature android:name="android.hardware.gamepad" android:required="false" />' android/app/src/main/AndroidManifest.xml
+          sed -i '/<activity android:name=".MainActivity"/,/android:theme="@style\/BootTheme"/ s/android:theme="@style\/BootTheme"/android:theme="@style\/BootTheme"\nandroid:supportsPictureInPicture="true"\nandroid:screenOrientation="landscape"/' android/app/src/main/AndroidManifest.xml
+          sed -i '/<category android:name="android.intent.category.LAUNCHER"/a\        <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>' android/app/src/main/AndroidManifest.xml
+          sed -i '/splits {/a\
+              abi {\
+                  enable true\
+                  reset()\
+                  include "armeabi-v7a"\
+                  universalApk false\
+              }' android/app/build.gradle
+          sed -i '/buildTypes {/,/}/ {
+            /release {/,/}/ {
+              /signingConfig/d
+              a\            ndk {\n                abiFilters "armeabi-v7a"\n            }
+            }
+          }' android/app/build.gradle
+
+      - name: Setup keystore for signing
+        run: |
+          echo "${{ secrets.SIGNINGKEYBASE64 }}" | base64 --decode > android/app/keystore.jks
+
+      - name: Configure signingConfigs in build.gradle
+        run: |
+          sed -i '/android {/a\
+              signingConfigs {\
+                  release {\
+                      storeFile file("keystore.jks")\
+                      storePassword System.getenv("KEYSTOREPASSWORD")\
+                      keyAlias System.getenv("ALIAS")\
+                      keyPassword System.getenv("KEYPASSWORD")\
+                  }\
+              }' android/app/build.gradle
+          sed -i '/buildTypes {/,/}/ {
+            /release {/,/}/ {
+              /signingConfig/d
+              a\            signingConfig signingConfigs.release
+            }
+          }' android/app/build.gradle
+
+      - name: Fix Gradle permissions
+        run: chmod +x android/gradlew
+
+      - name: Clean project
+        run: |
+          cd android
+          ./gradlew clean
+
+      - name: Build armeabi-v7a APK
+        env:
+          KEYSTOREPASSWORD: ${{ secrets.KEYSTOREPASSWORD }}
+          ALIAS: ${{ secrets.ALIAS }}
+          KEYPASSWORD: ${{ secrets.KEYPASSWORD }}
+        run: |
+          cd android
+          ./gradlew assembleRelease -PreactNativeArchitectures=armeabi-v7a --no-daemon
+
+      - name: Rename APK
+        run: |
+          cd android/app/build/outputs/apk/release
+          APK_FILE=$(find . -name "*.apk" -type f | head -1)
+          if [ -n "$APK_FILE" ]; then
+            APK_FILE=$(basename "$APK_FILE")
+            mv "$APK_FILE" "vega-tv-armv7-enhanced-v$(date +%Y%m%d-%H%M).apk"
+            echo "✅ Renamed to: vega-tv-armv7-enhanced-v$(date +%Y%m%d-%H%M).apk"
+          else
+            echo "❌ No APK found"
+            exit 1
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: vega-tv-armv7-enhanced-apk
+          path: android/app/build/outputs/apk/release/vega-tv-armv7-enhanced-*.apk
+          retention-days: 30
+
+      - name: Create Release
+        if: needs.sync-upstream.outputs.has_changes == 'true' || github.event.inputs.force_sync == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: android/app/build/outputs/apk/release/vega-tv-armv7-enhanced-*.apk
+          tag_name: tv-armv7-v${{ github.run_number }}
+          name: Vega TV ARMv7 Enhanced v${{ github.run_number }}
+          body: |
+            🎉 Vega Android TV - ARMv7 Enhanced Focus Build
+
+            📱 Built specifically for armeabi-v7a Android TV boxes
+            ✅ Enhanced focus indicators with bright cyan borders  
+            ✅ Complete D-pad navigation system
+            ✅ TV launcher integration
+            ✅ Signed with your personal keystore
+
+            📥 Installation:
+            1. Download the ARMv7 APK below
+            2. Enable Unknown Sources on your Android TV  
+            3. Install using file manager or ADB
+
+            🎮 Enhanced Focus Features:
+            - Cyan borders - 6px thick, highly visible
+            - Scale animation - Items grow 15% when focused
+            - Glow effects - Shadow and elevation for depth
+            - Better contrast for TV viewing distance
+          draft: false
+          prerelease: false
+
+  notify:
+    needs: [sync-upstream, build-tv-apk]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Build Success
+        if: needs.build-tv-apk.result == 'success'
+        run: echo "✅ ARMv7 Android TV APK built successfully!"
+
+      - name: Build Failed
+        if: needs.build-tv-apk.result == 'failure'
+        run: echo "❌ Build failed - check logs above"
