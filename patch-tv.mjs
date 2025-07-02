@@ -1,18 +1,6 @@
-// patch-tv.mjs
+// patch-tv.mjs - CORRECTED VERSION
 import fs from 'fs';
 import * as glob from 'glob';
-
-const focusedStyle = `{
-  borderColor: '#00BFFF',
-  borderWidth: 3,
-  borderRadius: 12,
-  backgroundColor: 'rgba(0,191,255,0.08)',
-  transform: [{ scale: 1.08 }],
-  shadowColor: '#00BFFF',
-  shadowRadius: 10,
-  shadowOpacity: 0.7,
-  elevation: 8,
-}`;
 
 const patterns = ['src/**/*.tsx', 'src/**/*.ts'];
 
@@ -20,45 +8,42 @@ for (const pattern of patterns) {
   for (const file of glob.sync(pattern)) {
     let code = fs.readFileSync(file, 'utf8');
     let orig = code;
-    let focusableCount = 0;
 
-    // Replace touchables
-    code = code.replace(/TouchableOpacity|TouchableNativeFeedback|Pressable/gi, 'TVFocusable');
-    // Remove overflow
-    code = code.replace(/overflow\s*:\s*['"]hidden['"],?/g, '');
-    code = code.replace(/\boverflow-hidden\b/g, '');
-    // Remove mobile-only props
+    // Skip if already has TVFocusable import
+    if (code.includes('TVFocusable')) {
+      continue;
+    }
+
+    // Simple replacements only
+    code = code.replace(/TouchableOpacity/g, 'TVFocusable');
+    code = code.replace(/TouchableNativeFeedback/g, 'TVFocusable');
+    code = code.replace(/TouchableHighlight/g, 'TVFocusable');
+    
+    // Remove problematic mobile props
     code = code.replace(/\s*activeOpacity\s*=\s*{[^}]*}/g, '');
     code = code.replace(/\s*underlayColor\s*=\s*{[^}]*}/g, '');
     code = code.replace(/\s*onLongPress\s*=\s*{[^}]*}/g, '');
+    
+    // Remove overflow hidden which interferes with focus borders
+    code = code.replace(/overflow\s*:\s*['"]hidden['"],?/g, '');
+    code = code.replace(/\boverflow-hidden\b/g, '');
 
-    // Add TVFocusable import if missing
-    if (!/TVFocusable/.test(code)) {
-      code = code.replace(/import.*from 'react'/, m => m + "\nimport { TVFocusable } from '../components/tv/TVFocusable';");
+    // Add TVFocusable import if we made changes
+    if (code !== orig && !code.includes('TVFocusable')) {
+      const reactImportMatch = code.match(/import.*from\s+['"]react['"];?\s*\n/);
+      if (reactImportMatch) {
+        const insertIndex = reactImportMatch.index + reactImportMatch[0].length;
+        const tvImport = "import { TVFocusable } from '../components/tv/TVFocusable';\n";
+        code = code.slice(0, insertIndex) + tvImport + code.slice(insertIndex);
+      }
     }
 
-    // Patch TVFocusable tags to add missing props as separate attributes
-    code = code.replace(/<TVFocusable([^>]*)>/g, (match, props) => {
-      let newProps = props || '';
-      // Only add the prop if it's not already present
-      if (!/focusedStyle\s*=/.test(newProps)) newProps += `\n  focusedStyle=${focusedStyle}`;
-      if (!/\baccessible\s*=/.test(newProps)) newProps += `\n  accessible={true}`;
-      if (!/accessibilityRole\s*=/.test(newProps)) newProps += `\n  accessibilityRole="button"`;
-      if (!/onFocus\s*=/.test(newProps)) newProps += `\n  onFocus={() => {}}`;
-      if (!/onBlur\s*=/.test(newProps)) newProps += `\n  onBlur={() => {}}`;
-      if (focusableCount === 0 && !/hasTVPreferredFocus\s*=/.test(newProps)) {
-        newProps += `\n  hasTVPreferredFocus={true}`;
-      }
-      focusableCount++;
-      // Clean up spacing and ensure each prop is on its own line
-      newProps = newProps.replace(/\s+/g, ' ').replace(/ \n/g, '\n').trim();
-      // Always ensure a space after <TVFocusable
-      return `<TVFocusable ${newProps}>`;
-    });
-
+    // Write file only if changed
     if (code !== orig) {
-      fs.writeFileSync(file, code, 'utf8');
-      console.log('Patched:', file);
+      fs.writeFileSync(file, 'utf8');
+      console.log('✅ Patched:', file);
     }
   }
 }
+
+console.log('🎯 TV patching complete!');
