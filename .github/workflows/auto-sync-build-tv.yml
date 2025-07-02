@@ -91,7 +91,6 @@ jobs:
       - name: Patch all src files for TV navigation (auto-inject focusedStyle & accessibility)
         run: node patch-tv.mjs
 
-      # 👇 NEW STEP: Upload all patched source files as artifact
       - name: Upload patched source files
         uses: actions/upload-artifact@v4
         with:
@@ -101,15 +100,19 @@ jobs:
       - name: Patch AndroidManifest.xml and build.gradle for TV and armeabi-v7a
         run: |
           sed -i '/<application /a\    <uses-feature android:name="android.software.leanback" android:required="true" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <uses-feature android:name="android.hardware.gamepad" android:required="false" />' android/app/src/main/AndroidManifest.xml
+
           sed -i '/<activity android:name=".MainActivity"/,/android:theme="@style\/BootTheme"/ s/android:theme="@style\/BootTheme"/android:theme="@style\/BootTheme"\nandroid:supportsPictureInPicture="true"\nandroid:screenOrientation="landscape"/' android/app/src/main/AndroidManifest.xml
+
           sed -i '/<category android:name="android.intent.category.LAUNCHER"/a\        <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>' android/app/src/main/AndroidManifest.xml
+
           sed -i '/splits {/a\
-      abi {\
-          enable true\
-          reset()\
-          include "armeabi-v7a"\
-          universalApk false\
-      }' android/app/build.gradle
+abi {\
+    enable true\
+    reset()\
+    include "armeabi-v7a"\
+    universalApk false\
+}' android/app/build.gradle
+
           sed -i '/buildTypes {/,/}/ {
             /release {/,/}/ {
               /signingConfig/d
