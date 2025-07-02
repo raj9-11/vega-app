@@ -106,12 +106,12 @@ jobs:
           sed -i '/<category android:name="android.intent.category.LAUNCHER"/a\        <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>' android/app/src/main/AndroidManifest.xml
 
           sed -i '/splits {/a\
-abi {\
-    enable true\
-    reset()\
-    include "armeabi-v7a"\
-    universalApk false\
-}' android/app/build.gradle
+          abi {\
+              enable true\
+              reset()\
+              include "armeabi-v7a"\
+              universalApk false\
+          }' android/app/build.gradle
 
           sed -i '/buildTypes {/,/}/ {
             /release {/,/}/ {
@@ -127,14 +127,14 @@ abi {\
       - name: Configure signingConfigs in build.gradle
         run: |
           sed -i '/android {/a\
-    signingConfigs {\
-        release {\
-            storeFile file("keystore.jks")\
-            storePassword System.getenv("KEYSTOREPASSWORD")\
-            keyAlias System.getenv("ALIAS")\
-            keyPassword System.getenv("KEYPASSWORD")\
-        }\
-    }' android/app/build.gradle
+          signingConfigs {\
+            release {\
+                storeFile file("keystore.jks")\
+                storePassword System.getenv("KEYSTOREPASSWORD")\
+                keyAlias System.getenv("ALIAS")\
+                keyPassword System.getenv("KEYPASSWORD")\
+            }\
+          }' android/app/build.gradle
           sed -i '/buildTypes {/,/}/ {
             /release {/,/}/ {
               /signingConfig/d
@@ -230,4 +230,4 @@ abi {\
 
       - name: Build Failed
         if: needs.build-tv-apk.result == 'failure'
-        run: echo "❌ Build failed - check log above"
+        run: echo "❌ Build failed - check logs above"
