@@ -14,7 +14,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [ main, master, android-tv-support, tv ]
+    branches: [ main, master, android-tv-support, Tv ]
 
 jobs:
   sync-upstream:
