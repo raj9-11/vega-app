@@ -1,7 +1,19 @@
+// patch-tv.mjs
 import fs from 'fs';
 import * as glob from 'glob';
 
-const focusedStyle = `{ borderColor: '#00BFFF', borderWidth: 3, borderRadius: 12, backgroundColor: 'rgba(0,191,255,0.08)', transform: [{ scale: 1.08 }], shadowColor: '#00BFFF', shadowRadius: 10, shadowOpacity: 0.7, elevation: 8 }`;
+const focusedStyle = `{
+  borderColor: '#00BFFF',
+  borderWidth: 3,
+  borderRadius: 12,
+  backgroundColor: 'rgba(0,191,255,0.08)',
+  transform: [{ scale: 1.08 }],
+  shadowColor: '#00BFFF',
+  shadowRadius: 10,
+  shadowOpacity: 0.7,
+  elevation: 8,
+}`;
+
 const patterns = ['src/**/*.tsx', 'src/**/*.ts'];
 
 for (const pattern of patterns) {
@@ -26,24 +38,26 @@ for (const pattern of patterns) {
     }
 
     // Patch TVFocusable tags to add missing props as separate attributes
-    code = code.replace(/<TVFocusable([^/>]*)(\/?)>/g, (match, props, selfClose) => {
+    code = code.replace(/<TVFocusable([^>]*)>/g, (match, props) => {
+      // Avoid patching if already present
       let newProps = props || '';
 
       // Only add the prop if it's not already present
-      if (!/focusedStyle\s*=/.test(newProps)) newProps += ` focusedStyle={${focusedStyle}}`;
-      if (!/\baccessible\s*=/.test(newProps)) newProps += ' accessible={true}';
-      if (!/accessibilityRole\s*=/.test(newProps)) newProps += ' accessibilityRole="button"';
-      if (!/onFocus\s*=/.test(newProps)) newProps += ' onFocus={() => {}}';
-      if (!/onBlur\s*=/.test(newProps)) newProps += ' onBlur={() => {}}';
+      if (!/focusedStyle\s*=/.test(newProps)) newProps += `\n  focusedStyle=${focusedStyle}`;
+      if (!/\baccessible\s*=/.test(newProps)) newProps += `\n  accessible={true}`;
+      if (!/accessibilityRole\s*=/.test(newProps)) newProps += `\n  accessibilityRole="button"`;
+      if (!/onFocus\s*=/.test(newProps)) newProps += `\n  onFocus={() => {}}`;
+      if (!/onBlur\s*=/.test(newProps)) newProps += `\n  onBlur={() => {}}`;
       if (focusableCount === 0 && !/hasTVPreferredFocus\s*=/.test(newProps)) {
-        newProps += ' hasTVPreferredFocus={true}';
+        newProps += `\n  hasTVPreferredFocus={true}`;
       }
       focusableCount++;
 
-      // Clean up spacing
-      newProps = newProps.replace(/\s+/g, ' ').trim();
+      // Clean up spacing and ensure each prop is on its own line
+      newProps = newProps.replace(/\s+/g, ' ').replace(/ \n/g, '\n').trim();
 
-      return `<TVFocusable ${newProps}${selfClose}>`;
+      // Rebuild the tag with line breaks for readability
+      return `<TVFocusable${newProps}>`;
     });
 
     if (code !== orig) {
