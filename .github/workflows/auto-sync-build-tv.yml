@@ -21,7 +21,6 @@ jobs:
     if: github.event.inputs.build_only != 'true'
     runs-on: ubuntu-latest
     name: Sync with Upstream Vega-App
-
     steps:
       - name: Checkout your fork
         uses: actions/checkout@v4
@@ -46,8 +45,8 @@ jobs:
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
           fi
-    outputs:
-      has_changes: ${{ steps.sync_check.outputs.has_changes }}
+        outputs:
+          has_changes: ${{ steps.sync_check.outputs.has_changes }}
 
   build-tv-apk:
     needs: [sync-upstream]
@@ -92,22 +91,31 @@ jobs:
       - name: Patch all src files for TV navigation (auto-inject focusedStyle & accessibility)
         run: node patch-tv.mjs
 
+      # 👇 NEW STEP: Upload all patched source files as artifact
+      - name: Upload patched source files
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-src
+          path: |
+            src/
+            # You can list specific files if you only want a subset
+
       - name: Patch AndroidManifest.xml and build.gradle for TV and armeabi-v7a
         run: |
           sed -i '/<application /a\    <uses-feature android:name="android.software.leanback" android:required="true" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <uses-feature android:name="android.hardware.gamepad" android:required="false" />' android/app/src/main/AndroidManifest.xml
           sed -i '/<activity android:name=".MainActivity"/,/android:theme="@style\/BootTheme"/ s/android:theme="@style\/BootTheme"/android:theme="@style\/BootTheme"\nandroid:supportsPictureInPicture="true"\nandroid:screenOrientation="landscape"/' android/app/src/main/AndroidManifest.xml
           sed -i '/<category android:name="android.intent.category.LAUNCHER"/a\        <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>' android/app/src/main/AndroidManifest.xml
           sed -i '/splits {/a\
-              abi {\
-                  enable true\
-                  reset()\
-                  include "armeabi-v7a"\
-                  universalApk false\
-              }' android/app/build.gradle
+abi {\
+enable true\
+reset()\
+include "armeabi-v7a"\
+universalApk false\
+}' android/app/build.gradle
           sed -i '/buildTypes {/,/}/ {
             /release {/,/}/ {
               /signingConfig/d
-              a\            ndk {\n                abiFilters "armeabi-v7a"\n            }
+              a\ ndk {\n abiFilters "armeabi-v7a"\n }
             }
           }' android/app/build.gradle
 
@@ -118,18 +126,18 @@ jobs:
       - name: Configure signingConfigs in build.gradle
         run: |
           sed -i '/android {/a\
-              signingConfigs {\
-                  release {\
-                      storeFile file("keystore.jks")\
-                      storePassword System.getenv("KEYSTOREPASSWORD")\
-                      keyAlias System.getenv("ALIAS")\
-                      keyPassword System.getenv("KEYPASSWORD")\
-                  }\
-              }' android/app/build.gradle
+signingConfigs {\
+release {\
+storeFile file("keystore.jks")\
+storePassword System.getenv("KEYSTOREPASSWORD")\
+keyAlias System.getenv("ALIAS")\
+keyPassword System.getenv("KEYPASSWORD")\
+}\
+}' android/app/build.gradle
           sed -i '/buildTypes {/,/}/ {
             /release {/,/}/ {
               /signingConfig/d
-              a\            signingConfig signingConfigs.release
+              a\ signingConfig signingConfigs.release
             }
           }' android/app/build.gradle
 
@@ -181,29 +189,40 @@ jobs:
             🎉 Vega Android TV - ARMv7 Enhanced Focus Build
 
             📱 Built specifically for armeabi-v7a Android TV boxes
-            ✅ Enhanced focus indicators with bright cyan borders  
+
+            ✅ Enhanced focus indicators with bright cyan borders
+
             ✅ Complete D-pad navigation system
+
             ✅ TV launcher integration
+
             ✅ Signed with your personal keystore
 
             📥 Installation:
+
             1. Download the ARMv7 APK below
-            2. Enable Unknown Sources on your Android TV  
+
+            2. Enable Unknown Sources on your Android TV
+
             3. Install using file manager or ADB
 
             🎮 Enhanced Focus Features:
+
             - Cyan borders - 6px thick, highly visible
+
             - Scale animation - Items grow 15% when focused
+
             - Glow effects - Shadow and elevation for depth
+
             - Better contrast for TV viewing distance
-          draft: false
-          prerelease: false
+
+        draft: false
+        prerelease: false
 
   notify:
     needs: [sync-upstream, build-tv-apk]
     if: always()
     runs-on: ubuntu-latest
-
     steps:
       - name: Build Success
         if: needs.build-tv-apk.result == 'success'
