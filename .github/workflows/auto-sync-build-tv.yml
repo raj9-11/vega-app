@@ -211,4 +211,4 @@ jobs:
 
       - name: Build Failed
         if: needs.build-tv-apk.result == 'failure'
-        run: echo "❌ Build failed - check logs above"
+        run: echo "❌ Build failed - check log above"
