@@ -91,7 +91,7 @@ jobs:
       - name: Patch all src files for TV navigation (auto-inject focusedStyle & accessibility)
         run: node patch-tv.mjs
 
-      # Upload patched source files as artifact
+      # 👇 NEW STEP: Upload all patched source files as artifact
       - name: Upload patched source files
         uses: actions/upload-artifact@v4
         with:
