@@ -45,8 +45,8 @@ jobs:
           else
             echo "has_changes=true" >> $GITHUB_OUTPUT
           fi
-        outputs:
-          has_changes: ${{ steps.sync_check.outputs.has_changes }}
+    outputs:
+      has_changes: ${{ steps.sync_check.outputs.has_changes }}
 
   build-tv-apk:
     needs: [sync-upstream]
@@ -91,14 +91,12 @@ jobs:
       - name: Patch all src files for TV navigation (auto-inject focusedStyle & accessibility)
         run: node patch-tv.mjs
 
-      # 👇 NEW STEP: Upload all patched source files as artifact
+      # Upload patched source files as artifact
       - name: Upload patched source files
         uses: actions/upload-artifact@v4
         with:
           name: patched-src
-          path: |
-            src/
-            # You can list specific files if you only want a subset
+          path: src/
 
       - name: Patch AndroidManifest.xml and build.gradle for TV and armeabi-v7a
         run: |
@@ -106,16 +104,16 @@ jobs:
           sed -i '/<activity android:name=".MainActivity"/,/android:theme="@style\/BootTheme"/ s/android:theme="@style\/BootTheme"/android:theme="@style\/BootTheme"\nandroid:supportsPictureInPicture="true"\nandroid:screenOrientation="landscape"/' android/app/src/main/AndroidManifest.xml
           sed -i '/<category android:name="android.intent.category.LAUNCHER"/a\        <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>' android/app/src/main/AndroidManifest.xml
           sed -i '/splits {/a\
-abi {\
-enable true\
-reset()\
-include "armeabi-v7a"\
-universalApk false\
-}' android/app/build.gradle
+      abi {\
+          enable true\
+          reset()\
+          include "armeabi-v7a"\
+          universalApk false\
+      }' android/app/build.gradle
           sed -i '/buildTypes {/,/}/ {
             /release {/,/}/ {
               /signingConfig/d
-              a\ ndk {\n abiFilters "armeabi-v7a"\n }
+              a\            ndk {\n                abiFilters "armeabi-v7a"\n            }
             }
           }' android/app/build.gradle
 
@@ -126,18 +124,18 @@ universalApk false\
       - name: Configure signingConfigs in build.gradle
         run: |
           sed -i '/android {/a\
-signingConfigs {\
-release {\
-storeFile file("keystore.jks")\
-storePassword System.getenv("KEYSTOREPASSWORD")\
-keyAlias System.getenv("ALIAS")\
-keyPassword System.getenv("KEYPASSWORD")\
-}\
-}' android/app/build.gradle
+    signingConfigs {\
+        release {\
+            storeFile file("keystore.jks")\
+            storePassword System.getenv("KEYSTOREPASSWORD")\
+            keyAlias System.getenv("ALIAS")\
+            keyPassword System.getenv("KEYPASSWORD")\
+        }\
+    }' android/app/build.gradle
           sed -i '/buildTypes {/,/}/ {
             /release {/,/}/ {
               /signingConfig/d
-              a\ signingConfig signingConfigs.release
+              a\            signingConfig signingConfigs.release
             }
           }' android/app/build.gradle
 
@@ -215,9 +213,8 @@ keyPassword System.getenv("KEYPASSWORD")\
             - Glow effects - Shadow and elevation for depth
 
             - Better contrast for TV viewing distance
-
-        draft: false
-        prerelease: false
+          draft: false
+          prerelease: false
 
   notify:
     needs: [sync-upstream, build-tv-apk]
